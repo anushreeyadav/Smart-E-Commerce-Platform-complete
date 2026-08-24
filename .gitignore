@@ -1,0 +1,29 @@
+# Environment files with real secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+venv/
+.venv/
+.venv-mac/
+*.db
+
+# Node / Next.js
+node_modules/
+.next/
+next-env.d.ts
+tsconfig.tsbuildinfo
+npm-debug.log*
+
+# Django
+staticfiles/
+media/
+*.sqlite3
+
+# OS
+.DS_Store

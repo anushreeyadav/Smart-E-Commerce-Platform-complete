@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Orders — Smart E-Commerce Admin</title>
+
+    <style>
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, Helvetica, sans-serif;
+            background: #f4f6f9;
+            color: #222;
+        }
+
+        .header {
+            background: #2f6f8f;
+            color: white;
+            padding: 22px 35px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .header h1 { margin: 0; font-size: 28px; }
+        .header p { margin: 6px 0 0; opacity: 0.9; }
+
+        .admin-link {
+            color: white;
+            text-decoration: none;
+            padding: 10px 16px;
+            border: 1px solid rgba(255,255,255,0.5);
+            border-radius: 6px;
+        }
+        .admin-link:hover { background: rgba(255,255,255,0.12); }
+
+        .container {
+            width: 92%;
+            max-width: 1400px;
+            margin: 30px auto;
+        }
+
+        .section-title { margin-bottom: 20px; }
+        .section-title h2 { margin: 0 0 6px; }
+        .section-title p { margin: 0; color: #555; }
+
+        .messages { margin-bottom: 20px; }
+        .message {
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+        .message.success { background: #e3f5e9; color: #1b6b3a; border: 1px solid #bfe6cd; }
+        .message.error { background: #fbe6e2; color: #a3341f; border: 1px solid #f3c3b6; }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+
+        th, td {
+            text-align: left;
+            padding: 12px 16px;
+            font-size: 14px;
+            border-bottom: 1px solid #eef1f4;
+        }
+
+        th {
+            background: #f0f3f6;
+            text-transform: uppercase;
+            font-size: 11px;
+            letter-spacing: 0.05em;
+            color: #667;
+        }
+
+        tr:last-child td { border-bottom: none; }
+
+        .pill {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: bold;
+            text-transform: uppercase;
+            background: #eef1f4;
+            color: #445;
+        }
+
+        .pill.paid, .pill.delivered { background: #e3f5e9; color: #1b6b3a; }
+        .pill.shipped { background: #fdf3d8; color: #92650c; }
+        .pill.confirmed { background: #e2eefc; color: #1c5aa8; }
+        .pill.cancelled, .pill.failed { background: #fbe6e2; color: #a3341f; }
+
+        .status-form { display: flex; gap: 8px; align-items: center; }
+
+        select, button {
+            font-size: 13px;
+            padding: 6px 10px;
+            border-radius: 6px;
+            border: 1px solid #ccd3da;
+        }
+
+        button {
+            background: #2f6f8f;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+
+        button:hover { background: #275c76; }
+
+        .muted { color: #8892a0; font-size: 13px; }
+
+        .table-wrap { overflow-x: auto; }
+    </style>
+</head>
+
+<body>
+
+<header class="header">
+    <div>
+        <h1>Smart E-Commerce</h1>
+        <p>Order Management</p>
+    </div>
+
+    <div style="display:flex; gap:12px;">
+        <a href="{% url 'dashboard:dashboard' %}" class="admin-link">Dashboard</a>
+        <a href="/admin/" class="admin-link">Django Admin</a>
+    </div>
+</header>
+
+<main class="container">
+    <div class="section-title">
+        <h2>Orders</h2>
+        <p>
+            Confirm shipments and deliveries. Status changes are sent to the
+            FastAPI backend, which validates the transition and handles the
+            customer notification, email, and real-time update.
+        </p>
+    </div>
+
+    {% if messages %}
+    <div class="messages">
+        {% for message in messages %}
+            <div class="message {{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Order</th>
+                    <th>Customer</th>
+                    <th>Payment</th>
+                    <th>Status</th>
+                    <th>Total</th>
+                    <th>Placed</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for order in orders %}
+                <tr>
+                    <td><code>{{ order.id }}</code></td>
+                    <td>
+                        {{ order.customer_name }}<br>
+                        <span class="muted">{{ order.customer_email }}</span>
+                    </td>
+                    <td><span class="pill {{ order.payment_status }}">{{ order.payment_status }}</span></td>
+                    <td><span class="pill {{ order.status }}">{{ order.status }}</span></td>
+                    <td>{{ order.currency|upper }} {{ order.total_amount }}</td>
+                    <td class="muted">{{ order.created_at }}</td>
+                    <td>
+                        {% if order.next_statuses %}
+                        <form
+                            class="status-form"
+                            method="post"
+                            action="{% url 'dashboard:update_order_status' order.id %}"
+                        >
+                            {% csrf_token %}
+                            <select name="status">
+                                {% for next_status in order.next_statuses %}
+                                <option value="{{ next_status }}">Mark {{ next_status }}</option>
+                                {% endfor %}
+                            </select>
+                            <button type="submit">Update</button>
+                        </form>
+                        {% else %}
+                        <span class="muted">No action</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="7" class="muted" style="text-align:center; padding:30px;">
+                        No orders yet.
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</main>
+
+</body>
+</html>
