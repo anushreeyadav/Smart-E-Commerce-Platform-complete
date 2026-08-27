@@ -1,0 +1,5 @@
+﻿User ID,Name,Email,Role,Status,Created Date
+10c2d268-93b2-48dd-a478-73776db36e2e,Demo Customer,customer@example.com,customer,Active,2026-08-19 10:23
+e87e920a-4d92-476f-adcc-949dd25e0162,Store Staff,staff@example.com,staff,Active,2026-08-19 10:23
+0bad6ff4-8244-44f3-98d8-0e99900ae7c1,System Administrator,admin@example.com,admin,Active,2026-08-19 09:00
+0cabca56-0f09-4f99-b4c5-406ae31cfe0d,Stripe Test Customer,stripecustomer@example.com,customer,Active,2026-08-19 07:23
