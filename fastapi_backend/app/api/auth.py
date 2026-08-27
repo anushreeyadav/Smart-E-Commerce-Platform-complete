@@ -125,6 +125,12 @@ def login(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This account has been deactivated",
+        )
+
     if not user.password:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -219,6 +225,12 @@ def refresh_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This account has been deactivated",
+        )
+
     new_access_token = create_access_token(
         data={
             "sub": user.id,
@@ -272,6 +284,12 @@ async def auth0_login(
         email=email,
         name=name,
     )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This account has been deactivated",
+        )
 
     access_token = create_access_token(
         data={

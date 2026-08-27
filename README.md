@@ -50,6 +50,8 @@ smart-ecommerce/
   - cart counts
   - order counts
   - revenue tracking
+  - Chart.js trends, stock, order, payment, and user metrics
+  - protected CSV/PDF reports
 - Next.js frontend
   - storefront home page
   - products page
@@ -77,6 +79,7 @@ Use these local credentials for FastAPI login:
 - Next.js frontend: `http://localhost:3000`
 - Django dashboard: `http://localhost:8080/dashboard/`
 - Django admin: `http://localhost:8080/admin/`
+- API reference: [`docs/API_DOCUMENTATION.md`](docs/API_DOCUMENTATION.md)
 
 ## Environment Setup
 
@@ -256,7 +259,7 @@ npm run dev
 - Working JWT login flow
 - Social login via Auth0
 - Stripe checkout and payment flow
-- Postman collection for authentication APIs
+- Complete Postman collection and local environment under `postman/`
 - Django analytics dashboard
 - Frontend storefront pages
 

@@ -42,7 +42,7 @@ def get_products(
     in_stock: bool | None = None,
 ) -> list[Product]:
 
-    query = db.query(Product)
+    query = db.query(Product).filter(Product.is_active.is_(True))
 
     if category:
         query = query.filter(Product.category.ilike(category))
@@ -71,13 +71,13 @@ def get_products(
 def get_product_by_id(
     db: Session,
     product_id: str,
+    *,
+    include_inactive: bool = False,
 ) -> Optional[Product]:
-
-    return (
-        db.query(Product)
-        .filter(Product.id == product_id)
-        .first()
-    )
+    query = db.query(Product).filter(Product.id == product_id)
+    if not include_inactive:
+        query = query.filter(Product.is_active.is_(True))
+    return query.first()
 
 
 def update_product(
@@ -103,6 +103,7 @@ def delete_product(
     db: Session,
     product: Product,
 ) -> None:
-
-    db.delete(product)
+    # Cart items and order items reference products.  Keep those references
+    # intact and hide the product from public browsing instead of deleting it.
+    product.is_active = False
     db.commit()

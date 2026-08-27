@@ -1,0 +1,12 @@
+.git
+.venv
+**/.venv
+**/node_modules
+**/.next
+**/__pycache__
+**/.pytest_cache
+*.pyc
+fastapi_backend/.env
+frontend/.env.local
+deliverables
+

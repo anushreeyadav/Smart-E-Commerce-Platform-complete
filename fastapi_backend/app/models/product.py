@@ -1,7 +1,7 @@
 from datetime import datetime
 import uuid
 
-from sqlalchemy import Column, DateTime, Integer, JSON, Numeric, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Integer, JSON, Numeric, String, Text
 from sqlalchemy.orm import relationship
 
 from app.db.database import Base
@@ -54,6 +54,14 @@ class Product(Base):
         Integer,
         nullable=False,
         default=0,
+        index=True,
+    )
+
+    is_active = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="true",
         index=True,
     )
 

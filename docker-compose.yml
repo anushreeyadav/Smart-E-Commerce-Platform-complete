@@ -1,0 +1,77 @@
+services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-smartdb}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  fastapi:
+    build: ./fastapi_backend
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-smartdb}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-development-only-change-me}
+      JWT_ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 30
+      REFRESH_TOKEN_EXPIRE_DAYS: 7
+      FRONTEND_URL: http://localhost:3000
+      CORS_ALLOWED_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      AUTH0_DOMAIN: ${AUTH0_DOMAIN:-}
+      AUTH0_CLIENT_ID: ${AUTH0_CLIENT_ID:-}
+      AUTH0_CLIENT_SECRET: ${AUTH0_CLIENT_SECRET:-}
+      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  django:
+    build: ./django_admin
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-smartdb}
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-development-only-change-me}
+      DJANGO_DEBUG: "True"
+      FASTAPI_BASE_URL: http://fastapi:8000
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-development-only-change-me}
+      JWT_ALGORITHM: HS256
+      AUTH0_DOMAIN: ${AUTH0_DOMAIN:-}
+      AUTH0_CLIENT_ID: ${AUTH0_CLIENT_ID:-}
+      AUTH0_CLIENT_SECRET: ${AUTH0_CLIENT_SECRET:-}
+      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-}
+    depends_on:
+      fastapi:
+        condition: service_started
+    ports:
+      - "8080:8080"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    environment:
+      APP_BASE_URL: http://localhost:3000
+      AUTH0_DOMAIN: ${AUTH0_DOMAIN:-}
+      AUTH0_CLIENT_ID: ${AUTH0_CLIENT_ID:-}
+      AUTH0_CLIENT_SECRET: ${AUTH0_CLIENT_SECRET:-}
+      AUTH0_SECRET: ${AUTH0_SECRET:-development-only-change-me-32-characters}
+      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-}
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    depends_on:
+      fastapi:
+        condition: service_started
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres_data:

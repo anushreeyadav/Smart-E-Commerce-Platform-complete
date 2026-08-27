@@ -154,6 +154,12 @@ def create_order_from_cart(
                 detail="Product not found",
             )
 
+        if not product.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Product is unavailable: {product.name}",
+            )
+
         if product.stock < cart_item.quantity:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

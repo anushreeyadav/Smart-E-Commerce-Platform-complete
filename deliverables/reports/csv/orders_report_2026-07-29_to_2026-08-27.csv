@@ -1,0 +1,13 @@
+﻿Order ID,Customer,Email,Date,Products,Total,Order Status,Payment Status,Payment Method,Transaction ID
+43d06877-c9d1-4bec-9b7c-6fcba7245d2a,Demo Customer,customer@example.com,2026-08-27 06:18,Test Laptop x1,50000.00,confirmed,pending,stripe,pi_3U8wdo8AFldWDSsn1aQ4oHOw
+8c09851b-f894-4dc3-ba8f-b90a4642e28b,Demo Customer,customer@example.com,2026-08-27 05:05,Running Shoes x1,3199.00,confirmed,pending,stripe,pi_3U8vVH8AFldWDSsn0aHmrila
+b74d187a-b364-4a43-8d96-94d374277721,Demo Customer,customer@example.com,2026-08-27 04:56,Smart Watch x1,3999.00,confirmed,pending,stripe,pi_3U8vMM8AFldWDSsn0qt6IgA5
+f946482e-5f1b-41f9-a551-0851f35689cd,Demo Customer,customer@example.com,2026-08-26 16:02,Smart Watch x1; Wireless Headphones x1,6498.00,confirmed,pending,stripe,pi_3U8jHX8AFldWDSsn1jDPwVdS
+86bac036-1176-48a8-9967-b766d8e0340f,Demo Customer,customer@example.com,2026-08-26 15:18,Smart Watch x1; Wireless Headphones x2,8997.00,confirmed,pending,stripe,pi_3U8ibK8AFldWDSsn1dCR0FCZ
+c2655e05-e553-416a-a314-c1a121a09d8a,Demo Customer,customer@example.com,2026-08-20 13:36,Test Laptop x1,50000.00,confirmed,pending,stripe,pi_3U6WAfG4UE5iWE1D0ESNjCqO
+168e141b-1af9-4077-b317-8d14a7a4230a,Demo Customer,customer@example.com,2026-08-20 13:33,Test Laptop x2; Wireless Headphones x1,102499.00,confirmed,pending,stripe,pi_3U6W7CG4UE5iWE1D0kH1QqkR
+fcc42cc2-ae49-4ab5-b246-7a647428d99b,Demo Customer,customer@example.com,2026-08-20 12:59,Smart Watch x2; Wireless Headphones x2,12996.00,confirmed,pending,stripe,pi_3U6VatG4UE5iWE1D00c0CyaI
+e3e33913-b8e8-40df-956b-826c0a8f8339,Demo Customer,customer@example.com,2026-08-20 11:40,Test Laptop x2,100000.00,confirmed,pending,stripe,pi_3U6UMUG4UE5iWE1D0QRXQbab
+b5af81ef-22bc-42bb-8326-941f72b8f52a,Demo Customer,customer@example.com,2026-08-20 10:33,Test Laptop x2; Wireless Headphones x2,104998.00,pending,pending,stripe,
+ee75b184-4ed3-4532-8e8e-db9986206dc4,Demo Customer,customer@example.com,2026-08-20 10:11,Wireless Headphones x2,4998.00,pending,pending,stripe,
+8ade4c0c-4266-4515-bffd-1c710496cd23,Demo Customer,customer@example.com,2026-08-19 12:02,Wireless Headphones x2,4998.00,pending,pending,cash_on_delivery,

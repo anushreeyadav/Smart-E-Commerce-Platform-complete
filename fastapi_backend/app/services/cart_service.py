@@ -45,6 +45,12 @@ def _get_product_or_404(db: Session, product_id: str) -> Product:
             detail="Product not found",
         )
 
+    if not product.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
     return product
 
 

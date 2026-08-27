@@ -1,7 +1,7 @@
 import enum
 import uuid
 
-from sqlalchemy import Column, DateTime, Enum, String
+from sqlalchemy import Boolean, Column, DateTime, Enum, String
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -61,4 +61,11 @@ class User(Base):
         "Notification",
         back_populates="user",
         cascade="all, delete-orphan",
+    )
+
+    is_active = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="true",
     )

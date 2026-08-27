@@ -88,6 +88,34 @@ def _fetch_orders(limit: int = 200):
     return orders
 
 
+def update_order_status_in_backend(order_id: str, new_status: str) -> None:
+    """Delegate validation, persistence, and notifications to FastAPI."""
+    token = _mint_service_token()
+    if not token:
+        raise RuntimeError("No active FastAPI admin/staff account is available.")
+
+    api_request = urllib.request.Request(
+        f"{settings.FASTAPI_BASE_URL}/orders/{order_id}/status",
+        data=json.dumps({"status": new_status}).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+        },
+        method="PATCH",
+    )
+
+    try:
+        with urllib.request.urlopen(api_request, timeout=10) as response:
+            response.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"Backend rejected the update: {detail}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(
+            f"Could not reach FastAPI at {settings.FASTAPI_BASE_URL}: {exc.reason}"
+        ) from exc
+
+
 @staff_member_required
 def orders_list(request):
     orders = _fetch_orders()

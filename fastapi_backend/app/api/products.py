@@ -109,10 +109,7 @@ def get_product(
     Public endpoint.
     """
 
-    product = get_product_by_id(
-        db,
-        product_id,
-    )
+    product = get_product_by_id(db, product_id)
 
     if not product:
         raise HTTPException(
@@ -182,6 +179,7 @@ def update_existing_product(
     product = get_product_by_id(
         db,
         product_id,
+        include_inactive=True,
     )
 
     if not product:
@@ -222,6 +220,7 @@ def delete_existing_product(
     product = get_product_by_id(
         db,
         product_id,
+        include_inactive=True,
     )
 
     if not product:

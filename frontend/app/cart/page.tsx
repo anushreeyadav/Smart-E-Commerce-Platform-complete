@@ -204,7 +204,7 @@ function CartPageContent() {
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,_#fff7ed,_#f8fafc_45%,_#e0f2fe_100%)] text-slate-900">
-      <header className="border-b border-white/70 bg-white/75 backdrop-blur-xl">
+      <header className="relative z-50 border-b border-white/70 bg-white/75 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-slate-950">

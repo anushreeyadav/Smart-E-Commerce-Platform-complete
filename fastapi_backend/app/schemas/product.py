@@ -90,6 +90,8 @@ class ProductResponse(BaseModel):
 
     popularity: int
 
+    is_active: bool
+
     created_at: datetime
 
     updated_at: datetime

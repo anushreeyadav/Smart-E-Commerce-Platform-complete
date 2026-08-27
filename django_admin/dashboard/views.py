@@ -1,362 +1,96 @@
+from datetime import timedelta
+
+from django.contrib.admin.views.decorators import staff_member_required
+from django.core.exceptions import PermissionDenied
 from django.db import connection
 from django.shortcuts import render
+from django.utils import timezone
 
 
-def table_exists(table_name):
-    """
-    Check whether a PostgreSQL table exists.
-    """
+LOW_STOCK_THRESHOLD = 10
+PERIODS = {
+    "today": ("Today", 0), "yesterday": ("Yesterday", 1),
+    "7d": ("Last 7 Days", 6), "30d": ("Last 30 Days", 29),
+    "3m": ("Last 3 Months", 89), "12m": ("Last 12 Months", 364),
+}
+
+
+def _scalar(sql, params=()):
     with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            SELECT EXISTS (
-                SELECT 1
-                FROM information_schema.tables
-                WHERE table_schema = 'public'
-                AND table_name = %s
-            )
-            """,
-            [table_name],
-        )
-
-        return cursor.fetchone()[0]
+        cursor.execute(sql, params)
+        return cursor.fetchone()[0] or 0
 
 
-def column_exists(table_name, column_name):
-    """
-    Check whether a column exists in a PostgreSQL table.
-    """
+def _rows(sql, params=()):
     with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            SELECT EXISTS (
-                SELECT 1
-                FROM information_schema.columns
-                WHERE table_schema = 'public'
-                AND table_name = %s
-                AND column_name = %s
-            )
-            """,
-            [table_name, column_name],
-        )
-
-        return cursor.fetchone()[0]
+        cursor.execute(sql, params)
+        columns = [item[0] for item in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
-def get_count(query, params=None):
-    """
-    Execute a COUNT query safely.
-    """
-    with connection.cursor() as cursor:
-        cursor.execute(query, params or [])
-        result = cursor.fetchone()
+def _range(request):
+    today = timezone.localdate()
+    period = request.GET.get("period", "30d")
+    if period == "custom":
+        try:
+            start = timezone.datetime.fromisoformat(request.GET["start"]).date()
+            end = timezone.datetime.fromisoformat(request.GET["end"]).date()
+            if end >= start:
+                return period, "Custom Range", start, end
+        except (KeyError, ValueError):
+            pass
+    label, days = PERIODS.get(period, PERIODS["30d"])
+    end = today - timedelta(days=1) if period == "yesterday" else today
+    return period, label, end - timedelta(days=days), end
 
-        if result:
-            return result[0] or 0
 
-        return 0
+def _series(rows, start, end, key):
+    values = {str(row["day"]): float(row[key]) for row in rows}
+    labels, data = [], []
+    while start <= end:
+        labels.append(start.strftime("%d %b"))
+        data.append(values.get(start.isoformat(), 0))
+        start += timedelta(days=1)
+    return labels, data
 
 
+@staff_member_required
 def dashboard(request):
-    """
-    Main Django analytics dashboard.
+    if not request.user.is_superuser:
+        raise PermissionDenied("Analytics is restricted to administrators.")
 
-    The dashboard reads analytics directly from the
-    PostgreSQL database used by the FastAPI e-commerce backend.
-    """
+    period, period_label, start, end = _range(request)
+    dates = (start, end)
+    valid_sale = "LOWER(p.status::text) = 'paid' AND LOWER(o.status::text) NOT IN ('cancelled', 'canceled')"
 
-    # ---------------------------------------------------------
-    # USERS
-    # ---------------------------------------------------------
+    total_users = _scalar("SELECT COUNT(*) FROM users")
+    total_products = _scalar("SELECT COUNT(*) FROM products")
+    total_orders = _scalar("SELECT COUNT(*) FROM orders")
+    customers = _scalar("SELECT COUNT(*) FROM users WHERE LOWER(role::text) = 'customer'")
+    staff = _scalar("SELECT COUNT(*) FROM users WHERE LOWER(role::text) = 'staff'")
+    admins = _scalar("SELECT COUNT(*) FROM users WHERE LOWER(role::text) = 'admin'")
+    pending_orders = _scalar("SELECT COUNT(*) FROM orders WHERE LOWER(status::text) = 'pending'")
+    low_stock = _scalar("SELECT COUNT(*) FROM products WHERE stock > 0 AND stock <= %s AND is_active = TRUE", (LOW_STOCK_THRESHOLD,))
+    out_of_stock = _scalar("SELECT COUNT(*) FROM products WHERE stock = 0 AND is_active = TRUE")
+    low_stock_products = _rows("SELECT name, stock FROM products WHERE stock <= %s AND is_active = TRUE ORDER BY stock, name LIMIT 10", (LOW_STOCK_THRESHOLD,))
 
-    total_users = 0
-    customer_count = 0
-    staff_count = 0
-    admin_count = 0
+    revenue = _scalar(f"SELECT COALESCE(SUM(p.amount), 0) FROM payments p JOIN orders o ON o.id=p.order_id WHERE {valid_sale} AND COALESCE(p.paid_at,p.created_at)::date BETWEEN %s AND %s", dates)
+    paid_orders = _scalar(f"SELECT COUNT(*) FROM payments p JOIN orders o ON o.id=p.order_id WHERE {valid_sale} AND COALESCE(p.paid_at,p.created_at)::date BETWEEN %s AND %s", dates)
+    revenue_rows = _rows(f"SELECT COALESCE(p.paid_at,p.created_at)::date AS day, SUM(p.amount) AS amount FROM payments p JOIN orders o ON o.id=p.order_id WHERE {valid_sale} AND COALESCE(p.paid_at,p.created_at)::date BETWEEN %s AND %s GROUP BY day ORDER BY day", dates)
+    sales_rows = _rows(f"SELECT COALESCE(p.paid_at,p.created_at)::date AS day, COUNT(*) AS count FROM payments p JOIN orders o ON o.id=p.order_id WHERE {valid_sale} AND COALESCE(p.paid_at,p.created_at)::date BETWEEN %s AND %s GROUP BY day ORDER BY day", dates)
+    labels, revenue_data = _series(revenue_rows, start, end, "amount")
+    _, sales_data = _series(sales_rows, start, end, "count")
+    top_products = _rows(f"SELECT pr.name, SUM(oi.quantity) AS quantity FROM order_items oi JOIN products pr ON pr.id=oi.product_id JOIN orders o ON o.id=oi.order_id JOIN payments p ON p.order_id=o.id WHERE {valid_sale} AND COALESCE(p.paid_at,p.created_at)::date BETWEEN %s AND %s GROUP BY pr.id,pr.name ORDER BY quantity DESC LIMIT 8", dates)
+    order_statuses = _rows("SELECT LOWER(status::text) AS label, COUNT(*) AS count FROM orders GROUP BY status ORDER BY label")
+    payment_statuses = _rows("SELECT LOWER(status::text) AS label, COUNT(*) AS count FROM payments GROUP BY status ORDER BY label")
 
-    if table_exists("users"):
-
-        total_users = get_count(
-            """
-            SELECT COUNT(*)
-            FROM users
-            """
-        )
-
-        # PostgreSQL enum-safe comparison.
-        #
-        # FastAPI may store enum labels as either uppercase names
-        # (ADMIN/STAFF/CUSTOMER) or lowercase values depending on
-        # how the type was created. LOWER(...) keeps this dashboard
-        # compatible with both styles.
-        customer_count = get_count(
-            """
-            SELECT COUNT(*)
-            FROM users
-            WHERE LOWER(role::text) = 'customer'
-            """
-        )
-
-        staff_count = get_count(
-            """
-            SELECT COUNT(*)
-            FROM users
-            WHERE LOWER(role::text) = 'staff'
-            """
-        )
-
-        admin_count = get_count(
-            """
-            SELECT COUNT(*)
-            FROM users
-            WHERE LOWER(role::text) = 'admin'
-            """
-        )
-
-
-    # ---------------------------------------------------------
-    # PRODUCTS
-    # ---------------------------------------------------------
-
-    total_products = 0
-    products_in_stock = 0
-    products_out_of_stock = 0
-
-    if table_exists("products"):
-
-        total_products = get_count(
-            """
-            SELECT COUNT(*)
-            FROM products
-            """
-        )
-
-        if column_exists("products", "stock"):
-
-            products_in_stock = get_count(
-                """
-                SELECT COUNT(*)
-                FROM products
-                WHERE stock > 0
-                """
-            )
-
-            products_out_of_stock = get_count(
-                """
-                SELECT COUNT(*)
-                FROM products
-                WHERE stock <= 0
-                """
-            )
-
-
-    # ---------------------------------------------------------
-    # CART
-    # ---------------------------------------------------------
-
-    total_cart_items = 0
-    active_cart_items = 0
-
-    if table_exists("cart_items"):
-
-        total_cart_items = get_count(
-            """
-            SELECT COUNT(*)
-            FROM cart_items
-            """
-        )
-
-        active_cart_items = get_count(
-            """
-            SELECT COUNT(*)
-            FROM cart_items
-            WHERE quantity > 0
-            """
-        )
-
-
-    # ---------------------------------------------------------
-    # ORDERS
-    # ---------------------------------------------------------
-
-    total_orders = 0
-    pending_orders = 0
-    completed_orders = 0
-    cancelled_orders = 0
-    total_revenue = 0
-    paid_payments = 0
-
-
-    if table_exists("orders"):
-
-        total_orders = get_count(
-            """
-            SELECT COUNT(*)
-            FROM orders
-            """
-        )
-
-        # -----------------------------------------------------
-        # Order status analytics
-        # -----------------------------------------------------
-
-        if column_exists("orders", "status"):
-
-            pending_orders = get_count(
-                """
-                SELECT COUNT(*)
-                FROM orders
-                WHERE LOWER(status::text) = 'pending'
-                """
-            )
-
-            completed_orders = get_count(
-                """
-                SELECT COUNT(*)
-                FROM orders
-                WHERE LOWER(status::text) IN (
-                    'confirmed',
-                    'completed',
-                    'delivered',
-                    'paid'
-                )
-                """
-            )
-
-            cancelled_orders = get_count(
-                """
-                SELECT COUNT(*)
-                FROM orders
-                WHERE LOWER(status::text) IN (
-                    'cancelled',
-                    'canceled'
-                )
-                """
-            )
-
-
-        # -----------------------------------------------------
-        # Payment / Revenue analytics
-        # -----------------------------------------------------
-        #
-        # Revenue should follow the payment table because the
-        # FastAPI flow marks payment as PAID and then confirms
-        # the order. That gives us the most accurate money
-        # number for the dashboard.
-        #
-        if table_exists("payments"):
-
-            if column_exists("payments", "status"):
-
-                paid_payments = get_count(
-                    """
-                    SELECT COUNT(*)
-                    FROM payments
-                    WHERE LOWER(status::text) = 'paid'
-                    """
-                )
-
-            amount_column = None
-
-            for column_name in [
-                "amount",
-                "total_amount",
-                "grand_total",
-                "payment_amount",
-            ]:
-
-                if column_exists("payments", column_name):
-                    amount_column = column_name
-                    break
-
-            if amount_column:
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        f"""
-                        SELECT COALESCE(SUM({amount_column}), 0)
-                        FROM payments
-                        WHERE LOWER(status::text) = 'paid'
-                        """
-                    )
-
-                    result = cursor.fetchone()
-
-                    if result:
-                        total_revenue = result[0] or 0
-
-            elif column_exists("orders", "total_amount"):
-                # Fallback if the payments table lacks an amount
-                # column for some reason.
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        """
-                        SELECT COALESCE(SUM(o.total_amount), 0)
-                        FROM orders o
-                        JOIN payments p ON p.order_id = o.id
-                        WHERE LOWER(p.status::text) = 'paid'
-                        """
-                    )
-
-                    result = cursor.fetchone()
-
-                    if result:
-                        total_revenue = result[0] or 0
-
-        elif column_exists("orders", "total_amount"):
-            # Last-resort fallback for older schemas.
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT COALESCE(SUM(total_amount), 0)
-                    FROM orders
-                    WHERE LOWER(status::text) IN (
-                        'confirmed',
-                        'completed',
-                        'delivered',
-                        'paid'
-                    )
-                    """
-                )
-
-                result = cursor.fetchone()
-
-                if result:
-                    total_revenue = result[0] or 0
-
-
-    # ---------------------------------------------------------
-    # DASHBOARD CONTEXT
-    # ---------------------------------------------------------
-
-    context = {
-        # Users
-        "total_users": total_users,
-        "customer_count": customer_count,
-        "staff_count": staff_count,
-        "admin_count": admin_count,
-
-        # Products
-        "total_products": total_products,
-        "products_in_stock": products_in_stock,
-        "products_out_of_stock": products_out_of_stock,
-
-        # Cart
-        "total_cart_items": total_cart_items,
-        "active_cart_items": active_cart_items,
-
-        # Orders
-        "total_orders": total_orders,
-        "pending_orders": pending_orders,
-        "completed_orders": completed_orders,
-        "cancelled_orders": cancelled_orders,
-        "paid_payments": paid_payments,
-
-        # Revenue
-        "total_revenue": total_revenue,
-    }
-
-    return render(
-        request,
-        "dashboard/dashboard.html",
-        context,
-    )
+    return render(request, "dashboard/dashboard.html", {
+        "period": period, "period_label": period_label, "start": start.isoformat(), "end": end.isoformat(),
+        "total_users": total_users, "total_products": total_products, "total_orders": total_orders,
+        "customers": customers, "staff": staff, "admins": admins, "pending_orders": pending_orders,
+        "low_stock": low_stock, "out_of_stock": out_of_stock, "low_stock_products": low_stock_products,
+        "revenue": revenue, "paid_orders": paid_orders, "average_order_value": revenue / paid_orders if paid_orders else 0,
+        "trend_labels": labels, "revenue_data": revenue_data, "sales_data": sales_data,
+        "top_products": top_products, "order_statuses": order_statuses, "payment_statuses": payment_statuses,
+        "low_stock_threshold": LOW_STOCK_THRESHOLD,
+    })

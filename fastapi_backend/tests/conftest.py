@@ -130,6 +130,11 @@ def staff_headers(staff_user):
 
 
 @pytest.fixture
+def admin_headers(admin_user):
+    return _auth_headers(admin_user)
+
+
+@pytest.fixture
 def product(db_session):
     item = Product(
         name="Test Widget",
