@@ -6,7 +6,7 @@ from tests.conftest import add_to_cart
 def _checkout(client, headers):
     return client.post(
         "/checkout",
-        json={"payment_method": "stripe", "currency": "usd"},
+        json={"payment_method": "stripe", "currency": "inr"},
         headers=headers,
     )
 

@@ -7,10 +7,17 @@ import AuthActionButton from "@/components/auth-action-button";
 import CartNavLink from "@/components/cart-nav-link";
 import NotificationBell from "@/components/notification-bell";
 import {
+  approveReturnRequest,
+  fetchAdminOrders,
+  fetchCurrentUser,
   fetchMyOrders,
+  fetchOrder,
   isAuthenticated,
   onOrderStatusChanged,
   Order,
+  rejectReturnRequest,
+  submitReturnRequest,
+  updateOrderStatus,
 } from "@/lib/storefront";
 
 const STATUS_STYLES: Record<string, string> = {
@@ -18,12 +25,26 @@ const STATUS_STYLES: Record<string, string> = {
   confirmed: "bg-sky-100 text-sky-700",
   paid: "bg-emerald-100 text-emerald-700",
   shipped: "bg-amber-100 text-amber-700",
+  out_for_delivery: "bg-orange-100 text-orange-700",
   delivered: "bg-teal-100 text-teal-700",
+  return_requested: "bg-violet-100 text-violet-700",
   cancelled: "bg-rose-100 text-rose-700",
 };
 
-function StatusPill({ status }: { status: string }) {
-  const style = STATUS_STYLES[status] ?? "bg-slate-100 text-slate-600";
+const RETURN_STATUS_STYLES: Record<string, string> = {
+  pending: "bg-amber-100 text-amber-700",
+  approved: "bg-emerald-100 text-emerald-700",
+  rejected: "bg-rose-100 text-rose-700",
+};
+
+function StatusPill({
+  status,
+  styles = STATUS_STYLES,
+}: {
+  status: string;
+  styles?: Record<string, string>;
+}) {
+  const style = styles[status] ?? "bg-slate-100 text-slate-600";
 
   return (
     <span
@@ -34,10 +55,19 @@ function StatusPill({ status }: { status: string }) {
   );
 }
 
-export default function OrdersPage() {
+// ---------------------------------------------------------------------------
+// Customer view: a signed-in customer's own order history. Unchanged from
+// the original /orders page other than being moved into this component.
+// ---------------------------------------------------------------------------
+
+function CustomerOrdersView() {
   const [orders, setOrders] = useState<Order[] | null>(null);
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [error, setError] = useState("");
+  const [returnOrder, setReturnOrder] = useState<Order | null>(null);
+  const [returnReason, setReturnReason] = useState("");
+  const [returnComments, setReturnComments] = useState("");
+  const [submittingReturn, setSubmittingReturn] = useState(false);
 
   const loadOrders = async () => {
     setError("");
@@ -69,6 +99,43 @@ export default function OrdersPage() {
     void loadOrders();
   }, []);
 
+  const closeReturnForm = () => {
+    setReturnOrder(null);
+    setReturnReason("");
+    setReturnComments("");
+  };
+
+  const submitReturn = async () => {
+    if (!returnOrder || !returnReason.trim()) return;
+
+    setSubmittingReturn(true);
+    setError("");
+    try {
+      const returnRequest = await submitReturnRequest(returnOrder.id, {
+        reason: returnReason.trim(),
+        comment: returnComments.trim() || undefined,
+      });
+      setOrders((current) =>
+        current
+          ? current.map((order) =>
+              order.id === returnOrder.id
+                ? { ...order, return_request: returnRequest, return_eligible: false }
+                : order
+            )
+          : current
+      );
+      closeReturnForm();
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : "Unable to submit your return request."
+      );
+    } finally {
+      setSubmittingReturn(false);
+    }
+  };
+
   useEffect(() => {
     return onOrderStatusChanged((payload) => {
       setOrders((current) =>
@@ -90,7 +157,7 @@ export default function OrdersPage() {
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,_#fff7ed,_#f8fafc_45%,_#e0f2fe_100%)] text-slate-900">
-      <header className="border-b border-white/70 bg-white/75 backdrop-blur-xl">
+      <header className="relative z-50 border-b border-white/70 bg-white/75 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-slate-950">
@@ -182,12 +249,15 @@ export default function OrdersPage() {
         ) : (
           <div className="space-y-4">
             {orders.map((order) => (
-              <Link
+              <div
                 key={order.id}
-                href={`/orders/${order.id}`}
-                className="block rounded-3xl border border-white/70 bg-white/85 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.06)] transition hover:border-cyan-200 hover:shadow-[0_20px_60px_rgba(8,145,178,0.12)]"
+                className="rounded-3xl border border-white/70 bg-white/85 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.06)] transition hover:border-cyan-200 hover:shadow-[0_20px_60px_rgba(8,145,178,0.12)]"
               >
-                <div className="flex flex-wrap items-center justify-between gap-4">
+                <Link
+                  href={`/orders/${order.id}`}
+                  className="block rounded-2xl focus:outline-none focus:ring-2 focus:ring-cyan-400"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-4">
                   <div>
                     <p className="text-xs uppercase tracking-[0.18em] text-slate-400">
                       Order
@@ -214,12 +284,836 @@ export default function OrdersPage() {
                       {Number(order.total_amount).toFixed(2)}
                     </p>
                   </div>
+                  </div>
+                </Link>
+
+                <div className="mt-5">
+                  {order.return_request ? (
+                    <span className="inline-flex rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-violet-700">
+                      Return Requested
+                    </span>
+                  ) : order.return_eligible ? (
+                    <button
+                      type="button"
+                      onClick={() => setReturnOrder(order)}
+                      className="rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
+                    >
+                      Request Return
+                    </button>
+                  ) : order.status === "delivered" ? (
+                    <span className="text-sm font-medium text-slate-500">
+                      Return Window Expired
+                    </span>
+                  ) : null}
                 </div>
-              </Link>
+              </div>
             ))}
           </div>
         )}
       </section>
+
+      {returnOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-6">
+          <div className="w-full max-w-lg rounded-3xl bg-white p-7 shadow-2xl">
+            <h3 className="text-2xl font-bold text-slate-950">Request a return</h3>
+            <p className="mt-2 text-sm text-slate-600">
+              Tell us why you would like to return order {returnOrder.id}.
+            </p>
+            <label className="mt-6 block text-sm font-semibold text-slate-800">
+              Return reason
+              <input
+                value={returnReason}
+                onChange={(event) => setReturnReason(event.target.value)}
+                maxLength={500}
+                required
+                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 outline-none focus:border-cyan-500"
+              />
+            </label>
+            <label className="mt-4 block text-sm font-semibold text-slate-800">
+              Comments <span className="font-normal text-slate-500">(optional)</span>
+              <textarea
+                value={returnComments}
+                onChange={(event) => setReturnComments(event.target.value)}
+                maxLength={5000}
+                rows={4}
+                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 outline-none focus:border-cyan-500"
+              />
+            </label>
+            <div className="mt-6 flex justify-end gap-3">
+              <button type="button" onClick={closeReturnForm} disabled={submittingReturn} className="rounded-full px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50">
+                Cancel
+              </button>
+              <button type="button" onClick={() => void submitReturn()} disabled={!returnReason.trim() || submittingReturn} className="rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50">
+                {submittingReturn ? "Submitting..." : "Submit Return Request"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Admin/Staff view: the order-management dashboard. Rendered instead of
+// CustomerOrdersView on this same /orders route when the signed-in user's
+// role is admin or staff.
+// ---------------------------------------------------------------------------
+
+const PAGE_SIZE = 20;
+
+const ORDER_STATUS_FILTERS = [
+  "pending",
+  "confirmed",
+  "paid",
+  "shipped",
+  "out_for_delivery",
+  "delivered",
+  "return_requested",
+  "cancelled",
+];
+
+// Mirrors ALLOWED_STATUS_TRANSITIONS in fastapi_backend/app/services/order_service.py.
+// return_requested is intentionally excluded: that transition only happens
+// when a customer submits a return request, never via manual admin action.
+const NEXT_STATUSES: Record<string, string[]> = {
+  pending: ["confirmed", "cancelled"],
+  confirmed: ["paid", "cancelled"],
+  paid: ["shipped", "cancelled"],
+  shipped: ["out_for_delivery", "delivered"],
+  out_for_delivery: ["delivered"],
+  delivered: [],
+  return_requested: [],
+  cancelled: [],
+};
+
+function formatDateTime(value?: string | null) {
+  if (!value) return "—";
+  return new Date(value).toLocaleString();
+}
+
+function formatMoney(order: Order) {
+  return `${order.currency.toUpperCase()} ${Number(order.total_amount).toFixed(2)}`;
+}
+
+function AdminOrdersView() {
+  const [orders, setOrders] = useState<Order[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [listLoading, setListLoading] = useState(false);
+  const [listError, setListError] = useState("");
+
+  const [statusFilter, setStatusFilter] = useState("");
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState("");
+  const [returnStatusFilter, setReturnStatusFilter] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
+
+  const [banner, setBanner] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  const [pendingStatus, setPendingStatus] = useState<string | null>(null);
+  const [statusActionLoading, setStatusActionLoading] = useState(false);
+
+  const [returnDialog, setReturnDialog] = useState<"approve" | "reject" | null>(null);
+  const [returnComment, setReturnComment] = useState("");
+  const [returnActionLoading, setReturnActionLoading] = useState(false);
+
+  const loadOrders = async () => {
+    setListLoading(true);
+    setListError("");
+    try {
+      const data = await fetchAdminOrders({
+        status: statusFilter || undefined,
+        paymentStatus: paymentStatusFilter || undefined,
+        returnStatus: returnStatusFilter || undefined,
+        search: search || undefined,
+        page,
+        pageSize: PAGE_SIZE,
+      });
+      setOrders(data.items);
+      setTotal(data.total);
+    } catch (err) {
+      setListError(err instanceof Error ? err.message : "Unable to load orders.");
+      setOrders(null);
+    } finally {
+      setListLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadOrders();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter, paymentStatusFilter, returnStatusFilter, search, page]);
+
+  const openOrder = async (orderId: string) => {
+    setSelectedOrderId(orderId);
+    setSelectedOrder(null);
+    setDetailError("");
+    setDetailLoading(true);
+    try {
+      const order = await fetchOrder(orderId);
+      setSelectedOrder(order);
+    } catch (err) {
+      setDetailError(err instanceof Error ? err.message : "Unable to load order details.");
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const closeDetail = () => {
+    setSelectedOrderId(null);
+    setSelectedOrder(null);
+    setPendingStatus(null);
+    setReturnDialog(null);
+    setReturnComment("");
+  };
+
+  const refreshAfterMutation = async (updatedOrder?: Order) => {
+    if (updatedOrder) {
+      setSelectedOrder(updatedOrder);
+    } else if (selectedOrderId) {
+      try {
+        setSelectedOrder(await fetchOrder(selectedOrderId));
+      } catch {
+        // detail refresh failing shouldn't block the list refresh below
+      }
+    }
+    void loadOrders();
+  };
+
+  const confirmStatusChange = async () => {
+    if (!selectedOrderId || !pendingStatus) return;
+    setStatusActionLoading(true);
+    try {
+      const updated = await updateOrderStatus(selectedOrderId, pendingStatus);
+      setBanner({ type: "success", text: `Order status updated to "${pendingStatus.replace(/_/g, " ")}".` });
+      setPendingStatus(null);
+      await refreshAfterMutation(updated);
+    } catch (err) {
+      setBanner({
+        type: "error",
+        text: err instanceof Error ? err.message : "Unable to update order status.",
+      });
+    } finally {
+      setStatusActionLoading(false);
+    }
+  };
+
+  const confirmReturnDecision = async () => {
+    if (!selectedOrderId || !returnDialog) return;
+    if (returnDialog === "reject" && !returnComment.trim()) {
+      setBanner({ type: "error", text: "A reason is required to reject a return request." });
+      return;
+    }
+
+    setReturnActionLoading(true);
+    try {
+      if (returnDialog === "approve") {
+        await approveReturnRequest(selectedOrderId, returnComment.trim() || undefined);
+        setBanner({ type: "success", text: "Return request approved." });
+      } else {
+        await rejectReturnRequest(selectedOrderId, returnComment.trim());
+        setBanner({ type: "success", text: "Return request rejected." });
+      }
+      setReturnDialog(null);
+      setReturnComment("");
+      await refreshAfterMutation();
+    } catch (err) {
+      setBanner({
+        type: "error",
+        text: err instanceof Error ? err.message : "Unable to process the return request.",
+      });
+    } finally {
+      setReturnActionLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!banner) return;
+    const timer = setTimeout(() => setBanner(null), 5000);
+    return () => clearTimeout(timer);
+  }, [banner]);
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  return (
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top,_#fff7ed,_#f8fafc_45%,_#e0f2fe_100%)] text-slate-900">
+      <header className="relative z-50 border-b border-white/70 bg-white/75 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-950">
+              Smart E-Commerce
+            </h1>
+            <p className="text-sm text-slate-500">Order Management</p>
+          </div>
+
+          <nav className="flex items-center gap-6">
+            <Link href="/" className="text-sm font-medium text-slate-700 transition hover:text-slate-950">
+              Home
+            </Link>
+            <Link href="/products" className="text-sm font-medium text-slate-700 transition hover:text-slate-950">
+              Products
+            </Link>
+            <NotificationBell />
+            <AuthActionButton />
+          </nav>
+        </div>
+      </header>
+
+      <section className="mx-auto max-w-7xl px-6 py-10">
+        <div className="mb-6 rounded-3xl border border-white/70 bg-white/80 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.06)]">
+          <div className="grid gap-4 md:grid-cols-4">
+            <div className="md:col-span-2">
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                Search
+              </label>
+              <div className="flex gap-2">
+                <input
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      setPage(1);
+                      setSearch(searchInput);
+                    }
+                  }}
+                  placeholder="Order ID, customer name, or email"
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-cyan-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPage(1);
+                    setSearch(searchInput);
+                  }}
+                  className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                >
+                  Search
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                Order status
+              </label>
+              <select
+                value={statusFilter}
+                onChange={(e) => {
+                  setPage(1);
+                  setStatusFilter(e.target.value);
+                }}
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-cyan-500"
+              >
+                <option value="">All statuses</option>
+                {ORDER_STATUS_FILTERS.map((s) => (
+                  <option key={s} value={s}>
+                    {s.replace(/_/g, " ")}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                Payment status
+              </label>
+              <select
+                value={paymentStatusFilter}
+                onChange={(e) => {
+                  setPage(1);
+                  setPaymentStatusFilter(e.target.value);
+                }}
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-cyan-500"
+              >
+                <option value="">All</option>
+                <option value="pending">Pending</option>
+                <option value="paid">Paid</option>
+                <option value="failed">Failed</option>
+                <option value="refunded">Refunded</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                Return status
+              </label>
+              <select
+                value={returnStatusFilter}
+                onChange={(e) => {
+                  setPage(1);
+                  setReturnStatusFilter(e.target.value);
+                }}
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-cyan-500"
+              >
+                <option value="">Any</option>
+                <option value="none">No return request</option>
+                <option value="pending">Pending review</option>
+                <option value="approved">Approved</option>
+                <option value="rejected">Rejected</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {banner && (
+          <div
+            className={`mb-6 rounded-2xl border px-5 py-4 ${
+              banner.type === "success"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                : "border-rose-200 bg-rose-50 text-rose-700"
+            }`}
+          >
+            {banner.text}
+          </div>
+        )}
+
+        {listError && (
+          <div className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-rose-700">
+            {listError}
+          </div>
+        )}
+
+        <div className="overflow-hidden rounded-3xl border border-white/70 bg-white/85 shadow-[0_20px_60px_rgba(15,23,42,0.06)]">
+          {listLoading ? (
+            <div className="p-12 text-center text-slate-500">Loading orders...</div>
+          ) : !orders || orders.length === 0 ? (
+            <div className="p-12 text-center text-slate-500">No orders match these filters.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[900px] text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">Order</th>
+                    <th className="px-4 py-3">Customer</th>
+                    <th className="px-4 py-3">Date</th>
+                    <th className="px-4 py-3">Total</th>
+                    <th className="px-4 py-3">Payment</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Return</th>
+                    <th className="px-4 py-3">Updated</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {orders.map((order) => (
+                    <tr
+                      key={order.id}
+                      onClick={() => void openOrder(order.id)}
+                      className="cursor-pointer transition hover:bg-cyan-50/60"
+                    >
+                      <td className="px-4 py-3 font-mono text-xs text-slate-700">
+                        {order.id.slice(0, 8)}…
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="font-semibold text-slate-900">
+                          {order.customer_name ?? "—"}
+                        </div>
+                        <div className="text-xs text-slate-500">{order.customer_email}</div>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">{formatDateTime(order.created_at)}</td>
+                      <td className="px-4 py-3 font-semibold text-slate-900">{formatMoney(order)}</td>
+                      <td className="px-4 py-3">
+                        <span className="text-xs font-semibold uppercase text-slate-600">
+                          {order.payment_status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusPill status={order.status} />
+                      </td>
+                      <td className="px-4 py-3">
+                        {order.return_request ? (
+                          <StatusPill
+                            status={order.return_request.status}
+                            styles={RETURN_STATUS_STYLES}
+                          />
+                        ) : (
+                          <span className="text-xs text-slate-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-slate-500">
+                        {formatDateTime(order.updated_at)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-6 flex items-center justify-between text-sm text-slate-600">
+          <span>
+            Page {page} of {totalPages} &middot; {total} orders
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="rounded-full border border-slate-200 px-4 py-2 font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              className="rounded-full border border-slate-200 px-4 py-2 font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {selectedOrderId && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/50 px-4 py-10">
+          <div className="w-full max-w-3xl rounded-3xl bg-white p-7 shadow-2xl">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-xl font-bold text-slate-950">Order details</h3>
+                <p className="mt-1 font-mono text-xs text-slate-500">{selectedOrderId}</p>
+              </div>
+              <button
+                type="button"
+                onClick={closeDetail}
+                className="rounded-full px-3 py-1 text-sm font-semibold text-slate-500 hover:bg-slate-100"
+              >
+                Close
+              </button>
+            </div>
+
+            {detailLoading ? (
+              <div className="py-16 text-center text-slate-500">Loading order...</div>
+            ) : detailError ? (
+              <div className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-rose-700">
+                {detailError}
+              </div>
+            ) : selectedOrder ? (
+              <div className="mt-6 space-y-6">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-xs uppercase tracking-wide text-slate-400">Customer</p>
+                    <p className="mt-1 font-semibold text-slate-900">
+                      {selectedOrder.customer_name ?? "—"}
+                    </p>
+                    <p className="text-sm text-slate-600">{selectedOrder.customer_email}</p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-xs uppercase tracking-wide text-slate-400">Shipping address</p>
+                    <p className="mt-1 whitespace-pre-line text-sm text-slate-700">
+                      {selectedOrder.shipping_address || "Not provided"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-xs uppercase tracking-wide text-slate-400">Order status</p>
+                    <div className="mt-2">
+                      <StatusPill status={selectedOrder.status} />
+                    </div>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-xs uppercase tracking-wide text-slate-400">Payment</p>
+                    <p className="mt-2 text-sm font-semibold text-slate-900">
+                      {selectedOrder.payment_status} &middot; {selectedOrder.payment_method}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-xs uppercase tracking-wide text-slate-400">Total</p>
+                    <p className="mt-2 text-sm font-semibold text-slate-900">
+                      {formatMoney(selectedOrder)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl bg-slate-50 p-4 text-xs text-slate-500">
+                  <div className="grid gap-1 sm:grid-cols-3">
+                    <span>Created: {formatDateTime(selectedOrder.created_at)}</span>
+                    <span>Updated: {formatDateTime(selectedOrder.updated_at)}</span>
+                    <span>Delivered: {formatDateTime(selectedOrder.delivered_at)}</span>
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="text-sm font-bold uppercase tracking-wide text-slate-500">Items</h4>
+                  <div className="mt-2 space-y-2">
+                    {selectedOrder.items.map((item) => (
+                      <div
+                        key={item.id}
+                        className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 text-sm"
+                      >
+                        <div>
+                          <p className="font-semibold text-slate-900">{item.product_name ?? "Product"}</p>
+                          <p className="text-xs text-slate-500">
+                            Qty {item.quantity} &middot; {selectedOrder.currency.toUpperCase()}{" "}
+                            {Number(item.unit_price).toFixed(2)} each
+                          </p>
+                        </div>
+                        <p className="font-semibold text-slate-900">
+                          {selectedOrder.currency.toUpperCase()}{" "}
+                          {(Number(item.unit_price) * item.quantity).toFixed(2)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="text-sm font-bold uppercase tracking-wide text-slate-500">
+                    Move to next status
+                  </h4>
+                  {NEXT_STATUSES[selectedOrder.status]?.length ? (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {NEXT_STATUSES[selectedOrder.status].map((next) => (
+                        <button
+                          key={next}
+                          type="button"
+                          onClick={() => setPendingStatus(next)}
+                          className="rounded-full bg-slate-950 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white transition hover:bg-slate-800"
+                        >
+                          Mark as {next.replace(/_/g, " ")}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-sm text-slate-500">
+                      No further status changes available for this order.
+                    </p>
+                  )}
+                </div>
+
+                {selectedOrder.status_history && selectedOrder.status_history.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-bold uppercase tracking-wide text-slate-500">
+                      Status history
+                    </h4>
+                    <ul className="mt-2 space-y-1.5 text-xs text-slate-600">
+                      {selectedOrder.status_history.map((entry) => (
+                        <li key={entry.id} className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-semibold text-slate-800">
+                            {entry.previous_status
+                              ? `${entry.previous_status} → ${entry.new_status}`
+                              : `created as ${entry.new_status}`}
+                          </span>
+                          <span>
+                            by {entry.changed_by_name ?? "system"} &middot;{" "}
+                            {formatDateTime(entry.created_at)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {selectedOrder.return_request && (
+                  <div className="rounded-2xl border border-violet-200 bg-violet-50 p-5">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-bold uppercase tracking-wide text-violet-800">
+                        Return request
+                      </h4>
+                      <StatusPill
+                        status={selectedOrder.return_request.status}
+                        styles={RETURN_STATUS_STYLES}
+                      />
+                    </div>
+
+                    <dl className="mt-3 space-y-2 text-sm text-slate-700">
+                      <div>
+                        <dt className="text-xs uppercase tracking-wide text-slate-500">Reason</dt>
+                        <dd>{selectedOrder.return_request.reason}</dd>
+                      </div>
+                      {selectedOrder.return_request.comments && (
+                        <div>
+                          <dt className="text-xs uppercase tracking-wide text-slate-500">
+                            Customer comments
+                          </dt>
+                          <dd>{selectedOrder.return_request.comments}</dd>
+                        </div>
+                      )}
+                      <div className="text-xs text-slate-500">
+                        Requested {formatDateTime(selectedOrder.return_request.created_at)}
+                      </div>
+                      {selectedOrder.return_request.reviewed_by_name && (
+                        <div className="text-xs text-slate-500">
+                          Reviewed by {selectedOrder.return_request.reviewed_by_name} on{" "}
+                          {formatDateTime(selectedOrder.return_request.reviewed_at)}
+                          {selectedOrder.return_request.review_comment && (
+                            <> — &ldquo;{selectedOrder.return_request.review_comment}&rdquo;</>
+                          )}
+                        </div>
+                      )}
+                    </dl>
+
+                    {selectedOrder.return_request.history &&
+                      selectedOrder.return_request.history.length > 0 && (
+                        <ul className="mt-3 space-y-1 border-t border-violet-200 pt-3 text-xs text-slate-600">
+                          {selectedOrder.return_request.history.map((entry) => (
+                            <li key={entry.id}>
+                              {entry.previous_status
+                                ? `${entry.previous_status} → ${entry.new_status}`
+                                : `submitted as ${entry.new_status}`}{" "}
+                              by {entry.changed_by_name ?? "customer"} &middot;{" "}
+                              {formatDateTime(entry.created_at)}
+                              {entry.comment && <> — &ldquo;{entry.comment}&rdquo;</>}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+
+                    {selectedOrder.return_request.status === "pending" && (
+                      <div className="mt-4 flex gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setReturnDialog("approve")}
+                          className="rounded-full bg-emerald-600 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white transition hover:bg-emerald-500"
+                        >
+                          Accept return
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setReturnDialog("reject")}
+                          className="rounded-full bg-rose-600 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white transition hover:bg-rose-500"
+                        >
+                          Reject return
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
+
+      {pendingStatus && selectedOrder && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/60 px-6">
+          <div className="w-full max-w-md rounded-3xl bg-white p-7 shadow-2xl">
+            <h3 className="text-lg font-bold text-slate-950">Confirm status change</h3>
+            <p className="mt-2 text-sm text-slate-600">
+              Move order <span className="font-mono text-xs">{selectedOrder.id.slice(0, 8)}…</span>{" "}
+              from <strong>{selectedOrder.status.replace(/_/g, " ")}</strong> to{" "}
+              <strong>{pendingStatus.replace(/_/g, " ")}</strong>?
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                disabled={statusActionLoading}
+                onClick={() => setPendingStatus(null)}
+                className="rounded-full px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={statusActionLoading}
+                onClick={() => void confirmStatusChange()}
+                className="rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+              >
+                {statusActionLoading ? "Updating..." : "Confirm"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {returnDialog && selectedOrder && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/60 px-6">
+          <div className="w-full max-w-md rounded-3xl bg-white p-7 shadow-2xl">
+            <h3 className="text-lg font-bold text-slate-950">
+              {returnDialog === "approve" ? "Accept return request" : "Reject return request"}
+            </h3>
+            <p className="mt-2 text-sm text-slate-600">
+              {returnDialog === "approve"
+                ? "Optionally add a note for the record."
+                : "A reason is required so the customer understands the decision."}
+            </p>
+            <textarea
+              value={returnComment}
+              onChange={(e) => setReturnComment(e.target.value)}
+              rows={3}
+              maxLength={2000}
+              placeholder={returnDialog === "approve" ? "Optional comment" : "Reason for rejection"}
+              className="mt-4 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-cyan-500"
+            />
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                disabled={returnActionLoading}
+                onClick={() => {
+                  setReturnDialog(null);
+                  setReturnComment("");
+                }}
+                className="rounded-full px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={returnActionLoading || (returnDialog === "reject" && !returnComment.trim())}
+                onClick={() => void confirmReturnDecision()}
+                className={`rounded-full px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 ${
+                  returnDialog === "approve"
+                    ? "bg-emerald-600 hover:bg-emerald-500"
+                    : "bg-rose-600 hover:bg-rose-500"
+                }`}
+              >
+                {returnActionLoading
+                  ? "Saving..."
+                  : returnDialog === "approve"
+                    ? "Confirm accept"
+                    : "Confirm reject"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </main>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Route entry point: resolve the signed-in user's role once, then delegate
+// to the matching view. Both views live at the same /orders URL.
+// ---------------------------------------------------------------------------
+
+type ViewRole = "resolving" | "admin" | "customer";
+
+export default function OrdersPage() {
+  const [viewRole, setViewRole] = useState<ViewRole>("resolving");
+
+  useEffect(() => {
+    const resolveRole = async () => {
+      const signedIn = await isAuthenticated();
+      if (!signedIn) {
+        setViewRole("customer"); // CustomerOrdersView shows the login prompt
+        return;
+      }
+      try {
+        const user = await fetchCurrentUser();
+        setViewRole(user.role === "admin" || user.role === "staff" ? "admin" : "customer");
+      } catch {
+        setViewRole("customer");
+      }
+    };
+    void resolveRole();
+  }, []);
+
+  if (viewRole === "resolving") {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_#fff7ed,_#f8fafc_45%,_#e0f2fe_100%)] text-slate-500">
+        Loading...
+      </main>
+    );
+  }
+
+  return viewRole === "admin" ? <AdminOrdersView /> : <CustomerOrdersView />;
 }

@@ -460,7 +460,7 @@ export async function createCheckoutSession(
     method: "POST",
     body: JSON.stringify({
       payment_method: request.payment_method ?? "stripe",
-      currency: request.currency ?? "usd",
+      currency: request.currency ?? "inr",
       success_url: request.success_url,
       cancel_url: request.cancel_url,
     }),
@@ -529,9 +529,30 @@ export interface OrderItem {
   product_name?: string | null;
 }
 
+export interface OrderStatusHistoryEntry {
+  id: string;
+  previous_status?: string | null;
+  new_status: string;
+  changed_by?: string | null;
+  changed_by_name?: string | null;
+  created_at: string;
+}
+
+export interface ReturnRequestHistoryEntry {
+  id: string;
+  previous_status?: string | null;
+  new_status: string;
+  comment?: string | null;
+  changed_by?: string | null;
+  changed_by_name?: string | null;
+  created_at: string;
+}
+
 export interface Order {
   id: string;
   user_id: string;
+  customer_name?: string | null;
+  customer_email?: string | null;
   status: string;
   payment_status: string;
   total_amount: number;
@@ -539,8 +560,45 @@ export interface Order {
   currency: string;
   stripe_checkout_session_id?: string | null;
   stripe_payment_intent_id?: string | null;
+  shipping_address?: string | null;
   created_at: string;
+  updated_at?: string | null;
+  delivered_at?: string | null;
   items: OrderItem[];
+  return_request?: ReturnRequest | null;
+  return_eligible: boolean;
+  return_window_expires_at?: string | null;
+  status_history?: OrderStatusHistoryEntry[];
+}
+
+export interface ReturnRequest {
+  id: string;
+  order_id: string;
+  user_id: string;
+  reason: string;
+  comments?: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  reviewed_by?: string | null;
+  reviewed_by_name?: string | null;
+  reviewed_at?: string | null;
+  review_comment?: string | null;
+  history?: ReturnRequestHistoryEntry[];
+}
+
+export interface PaginatedOrders {
+  items: Order[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface CurrentUser {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
 }
 
 export async function fetchMyOrders() {
@@ -549,6 +607,63 @@ export async function fetchMyOrders() {
 
 export async function fetchOrder(orderId: string) {
   return authedFetch<Order>(`/orders/${orderId}`);
+}
+
+export async function submitReturnRequest(
+  orderId: string,
+  request: { reason: string; comment?: string }
+) {
+  return authedFetch<ReturnRequest>(`/orders/${orderId}/return`, {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export async function fetchCurrentUser() {
+  return authedFetch<CurrentUser>("/auth/me");
+}
+
+export interface AdminOrderFilters {
+  status?: string;
+  paymentStatus?: string;
+  returnStatus?: string;
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export async function fetchAdminOrders(filters: AdminOrderFilters = {}) {
+  const query = buildQuery({
+    status: filters.status,
+    payment_status: filters.paymentStatus,
+    return_status: filters.returnStatus,
+    search: filters.search,
+    page: filters.page ? String(filters.page) : undefined,
+    page_size: filters.pageSize ? String(filters.pageSize) : undefined,
+  });
+
+  return authedFetch<PaginatedOrders>(`/orders${query}`);
+}
+
+export async function updateOrderStatus(orderId: string, status: string) {
+  return authedFetch<Order>(`/orders/${orderId}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  });
+}
+
+export async function approveReturnRequest(orderId: string, comment?: string) {
+  return authedFetch<ReturnRequest>(`/orders/${orderId}/return/approve`, {
+    method: "POST",
+    body: JSON.stringify({ comment: comment || undefined }),
+  });
+}
+
+export async function rejectReturnRequest(orderId: string, comment: string) {
+  return authedFetch<ReturnRequest>(`/orders/${orderId}/return/reject`, {
+    method: "POST",
+    body: JSON.stringify({ comment }),
+  });
 }
 
 export function getWebSocketUrl() {

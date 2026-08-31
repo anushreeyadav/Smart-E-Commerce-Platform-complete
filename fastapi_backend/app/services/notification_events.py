@@ -269,10 +269,13 @@ async def handle_order_status_change(
     order: Order,
     new_status: OrderStatus,
     background_tasks: BackgroundTasks,
+    changed_by_user_id: str | None = None,
 ) -> tuple[Order, bool]:
     old_status = order.status
 
-    order, changed = order_service.update_order_status(db, order, new_status)
+    order, changed = order_service.update_order_status(
+        db, order, new_status, changed_by=changed_by_user_id
+    )
 
     if not changed:
         return order, False

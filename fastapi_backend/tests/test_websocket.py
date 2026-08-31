@@ -43,7 +43,7 @@ def test_notification_created_is_pushed_over_the_socket(
         add_to_cart(client, customer_headers, product.id, 1)
         client.post(
             "/checkout",
-            json={"payment_method": "stripe", "currency": "usd"},
+            json={"payment_method": "stripe", "currency": "inr"},
             headers=customer_headers,
         )
 

@@ -1,0 +1,23 @@
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'orderstatus') THEN
+        ALTER TYPE orderstatus ADD VALUE IF NOT EXISTS 'RETURN_REQUESTED';
+    END IF;
+END $$;
+
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMP WITH TIME ZONE;
+
+CREATE TABLE IF NOT EXISTS return_requests (
+    id VARCHAR(36) PRIMARY KEY,
+    order_id VARCHAR(36) NOT NULL UNIQUE REFERENCES orders(id) ON DELETE CASCADE,
+    user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    reason VARCHAR(500) NOT NULL,
+    comments TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    CONSTRAINT ck_return_requests_status
+        CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED')),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS ix_return_requests_user_id ON return_requests (user_id);

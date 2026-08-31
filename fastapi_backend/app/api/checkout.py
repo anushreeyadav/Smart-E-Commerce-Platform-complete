@@ -1,6 +1,7 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, status
 from sqlalchemy.orm import Session
 
+from app.core.config import BASE_CURRENCY, CURRENCY_RATES
 from app.core.dependencies import require_roles
 from app.db.database import get_db
 from app.models.user import User, UserRole
@@ -16,6 +17,17 @@ from app.services.order_service import (
 router = APIRouter(
     tags=["Checkout"],
 )
+
+
+@router.get("/checkout/currencies")
+def list_supported_currencies():
+    return {
+        "base_currency": BASE_CURRENCY,
+        "currencies": [
+            {"code": code, "rate_from_base": rate}
+            for code, rate in CURRENCY_RATES.items()
+        ],
+    }
 
 
 @router.post(
@@ -36,6 +48,7 @@ async def checkout(
         currency=request.currency,
         success_url=request.success_url,
         cancel_url=request.cancel_url,
+        shipping_address=request.shipping_address,
     )
 
     await handle_order_created(

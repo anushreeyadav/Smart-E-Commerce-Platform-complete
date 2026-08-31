@@ -102,7 +102,7 @@ export default function ProductsPage() {
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,_#f7f1e8,_#f9fafb_45%,_#eef2ff_100%)] text-slate-900">
-      <header className="border-b border-white/60 bg-white/70 backdrop-blur-xl">
+      <header className="relative z-50 border-b border-white/60 bg-white/70 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-slate-950">
@@ -319,7 +319,7 @@ export default function ProductsPage() {
                         Price
                       </p>
                       <p className="text-2xl font-black text-slate-950">
-                        Rs. {Number(product.price).toFixed(2)}
+                        ₹ {Number(product.price).toFixed(2)}
                       </p>
                     </div>
                     <div className="text-right">

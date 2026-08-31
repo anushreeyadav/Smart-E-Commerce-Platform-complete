@@ -67,7 +67,7 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-slate-950 text-white">
-      <header className="border-b border-white/10 bg-slate-950/80 backdrop-blur">
+      <header className="relative z-50 border-b border-white/10 bg-slate-950/80 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Smart E-Commerce</h1>
@@ -230,7 +230,7 @@ export default function Home() {
                         Price
                       </p>
                       <p className="text-2xl font-black text-white">
-                        Rs. {Number(product.price).toFixed(2)}
+                        ₹ {Number(product.price).toFixed(2)}
                       </p>
                     </div>
                     <div className="text-right">

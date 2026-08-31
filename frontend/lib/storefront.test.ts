@@ -8,6 +8,7 @@ import {
   onCartChanged,
   onOrderStatusChanged,
   OrderStatusUpdatedPayload,
+  submitReturnRequest,
 } from "./storefront";
 
 describe("cart-changed event bus", () => {
@@ -131,5 +132,36 @@ describe("fetchNotifications", () => {
     expect(url).toContain("/notifications");
     expect(url).toContain("page=1");
     expect(url).toContain("page_size=100");
+  });
+});
+
+describe("submitReturnRequest", () => {
+  beforeEach(() => {
+    window.localStorage.setItem("smart_customer_access_token", fakeJwt(3600));
+  });
+
+  afterEach(() => {
+    window.localStorage.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("posts the reason and optional comments to the order return endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: "return-1", status: "pending" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await submitReturnRequest("order-1", {
+      reason: "Damaged item",
+      comment: "The box was torn.",
+    });
+
+    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/orders/order-1/return");
+    expect(options.method).toBe("POST");
+    expect(options.body).toBe(
+      JSON.stringify({ reason: "Damaged item", comment: "The box was torn." })
+    );
   });
 });

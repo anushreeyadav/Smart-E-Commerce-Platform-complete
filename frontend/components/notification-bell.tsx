@@ -22,25 +22,20 @@ export default function NotificationBell() {
       <button
         type="button"
         onClick={handleOpen}
-        className="relative inline-flex items-center gap-2 text-sm font-medium text-slate-700 transition hover:text-slate-950"
+        className="relative inline-flex items-center text-sm font-medium text-slate-700 transition hover:text-slate-950"
         aria-label="Open notifications"
       >
-        <span
-  aria-hidden="true"
-  className="text-lg leading-none"
->
-  🔔
-</span>
-
-        <span
-          className={`inline-flex min-w-6 items-center justify-center rounded-full px-2 py-0.5 text-xs font-bold ${
-            unreadCount > 0
-              ? "bg-rose-500 text-white"
-              : "bg-slate-200 text-slate-600"
-          }`}
-        >
-          {unreadCount}
+        <span aria-hidden="true" className="text-lg leading-none">
+          🔔
         </span>
+
+        {unreadCount > 0 && (
+          <span
+            className="absolute -right-2 -top-2 z-10 inline-flex min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 py-0.5 text-[11px] font-bold leading-none text-white shadow-sm"
+          >
+            {unreadCount}
+          </span>
+        )}
       </button>
 
       {isOpen && (

@@ -27,6 +27,8 @@ function CartPageContent() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const searchParams = useSearchParams();
 
+  const formatAmount = (amount: number) => `₹ ${amount.toFixed(2)}`;
+
   const loadCart = async () => {
     setLoading(true);
     setError("");
@@ -307,17 +309,17 @@ function CartPageContent() {
               <div className="mt-6 space-y-4 text-sm text-slate-300">
                 <div className="flex items-center justify-between">
                   <span>Cart total</span>
-                  <span>Rs. 0.00</span>
+                  <span>{formatAmount(0)}</span>
                 </div>
 
                 <div className="flex items-center justify-between">
                   <span>Tax</span>
-                  <span>Rs. 0.00</span>
+                  <span>{formatAmount(0)}</span>
                 </div>
 
                 <div className="flex items-center justify-between border-t border-white/10 pt-4 text-base font-semibold text-white">
                   <span>Grand total</span>
-                  <span>Rs. 0.00</span>
+                  <span>{formatAmount(0)}</span>
                 </div>
               </div>
             </div>
@@ -353,17 +355,17 @@ function CartPageContent() {
               <div className="mt-6 space-y-4 text-sm text-slate-300">
                 <div className="flex items-center justify-between">
                   <span>Cart total</span>
-                  <span>Rs. 0.00</span>
+                  <span>{formatAmount(0)}</span>
                 </div>
 
                 <div className="flex items-center justify-between">
                   <span>Tax</span>
-                  <span>Rs. 0.00</span>
+                  <span>{formatAmount(0)}</span>
                 </div>
 
                 <div className="flex items-center justify-between border-t border-white/10 pt-4 text-base font-semibold text-white">
                   <span>Grand total</span>
-                  <span>Rs. 0.00</span>
+                  <span>{formatAmount(0)}</span>
                 </div>
               </div>
             </div>
@@ -410,7 +412,7 @@ function CartPageContent() {
                           </p>
 
                           <p className="text-xl font-black text-slate-950">
-                            Rs. {Number(item.item_total).toFixed(2)}
+                            {formatAmount(Number(item.item_total))}
                           </p>
                         </div>
                       </div>
@@ -468,7 +470,7 @@ function CartPageContent() {
                           </p>
 
                           <p className="mt-1 font-semibold text-slate-900">
-                            Rs. {Number(item.unit_price).toFixed(2)}
+                            {formatAmount(Number(item.unit_price))}
                           </p>
                         </div>
 
@@ -511,21 +513,17 @@ function CartPageContent() {
 
                 <div className="flex items-center justify-between">
                   <span>Cart total</span>
-                  <span>
-                    Rs. {Number(cart.totals.cart_total).toFixed(2)}
-                  </span>
+                  <span>{formatAmount(Number(cart.totals.cart_total))}</span>
                 </div>
 
                 <div className="flex items-center justify-between">
                   <span>Tax</span>
-                  <span>Rs. {Number(cart.totals.tax).toFixed(2)}</span>
+                  <span>{formatAmount(Number(cart.totals.tax))}</span>
                 </div>
 
                 <div className="flex items-center justify-between border-t border-white/10 pt-4 text-base font-semibold text-white">
                   <span>Grand total</span>
-                  <span>
-                    Rs. {Number(cart.totals.grand_total).toFixed(2)}
-                  </span>
+                  <span>{formatAmount(Number(cart.totals.grand_total))}</span>
                 </div>
               </div>
 

@@ -17,7 +17,7 @@ def _fake_order(status=OrderStatus.CONFIRMED):
         payment_status="pending",
         total_amount=49.99,
         payment_method="stripe",
-        currency="usd",
+        currency="inr",
     )
 
 

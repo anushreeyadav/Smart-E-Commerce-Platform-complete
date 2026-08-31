@@ -62,6 +62,12 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    return_requests = relationship(
+        "ReturnRequest",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        foreign_keys="ReturnRequest.user_id",
+    )
 
     is_active = Column(
         Boolean,

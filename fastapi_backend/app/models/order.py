@@ -1,7 +1,8 @@
 import enum
 import uuid
 
-from sqlalchemy import Column, DateTime, Enum, ForeignKey, Integer, Numeric, String
+from sqlalchemy import Column, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from app.db.database import Base
@@ -13,7 +14,9 @@ class OrderStatus(str, enum.Enum):
     CONFIRMED = "confirmed"
     PAID = "paid"
     SHIPPED = "shipped"
+    OUT_FOR_DELIVERY = "out_for_delivery"
     DELIVERED = "delivered"
+    RETURN_REQUESTED = "return_requested"
     CANCELLED = "cancelled"
 
 
@@ -60,7 +63,7 @@ class Order(Base):
     currency = Column(
         String(3),
         nullable=False,
-        default="usd",
+        default="inr",
     )
 
     stripe_checkout_session_id = Column(
@@ -82,6 +85,39 @@ class Order(Base):
         server_default=func.now(),
         nullable=False,
     )
+
+    delivered_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    shipping_address = Column(
+        Text,
+        nullable=True,
+    )
+
+    return_request = relationship(
+        "ReturnRequest",
+        back_populates="order",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+    status_history = relationship(
+        "OrderStatusHistory",
+        back_populates="order",
+        cascade="all, delete-orphan",
+        order_by="OrderStatusHistory.created_at",
+    )
+
+    user = relationship("User")
 
 
 class OrderItem(Base):
