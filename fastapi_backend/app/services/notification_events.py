@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models.notification import Notification, NotificationType
 from app.models.order import Order, OrderStatus
-from app.models.payment import Payment
+from app.models.payment import Payment, PaymentStatus
 from app.models.user import User
 from app.services import order_service
 from app.services.connection_manager import manager
@@ -221,6 +221,59 @@ async def handle_stripe_payment_failed(
         await _emit_payment_failed(db, order=order, background_tasks=background_tasks)
 
     return payment
+
+
+async def handle_stripe_payment_sync(
+    db: Session,
+    *,
+    order: Order,
+    background_tasks: BackgroundTasks,
+) -> tuple[Payment, str]:
+    """Synchronous fallback for right after a customer returns from Stripe
+    Checkout: verifies the real payment state directly with Stripe and, if
+    it has resolved, applies the exact same transition the async webhook
+    would (reusing handle_stripe_payment_succeeded/failed below - no
+    duplicated business logic). Safe to call repeatedly or race against the
+    webhook, since both paths funnel through the same idempotent functions.
+    """
+
+    verified_state, payment_intent_id = order_service.verify_stripe_checkout_payment(
+        db, order=order
+    )
+
+    if verified_state == "paid":
+        payment = await handle_stripe_payment_succeeded(
+            db,
+            order=order,
+            payment_intent_id=payment_intent_id,
+            background_tasks=background_tasks,
+        )
+        return payment, verified_state
+
+    if verified_state == "failed":
+        payment = await handle_stripe_payment_failed(
+            db,
+            order=order,
+            payment_intent_id=payment_intent_id,
+            background_tasks=background_tasks,
+        )
+        return payment, verified_state
+
+    payment = order_service.get_payment_by_order_id(db, order.id)
+
+    if not payment:
+        payment = Payment(
+            order_id=order.id,
+            amount=order.total_amount,
+            payment_method="stripe",
+            status=PaymentStatus.PENDING,
+            transaction_id=payment_intent_id,
+        )
+        db.add(payment)
+        db.commit()
+        db.refresh(payment)
+
+    return payment, verified_state
 
 
 async def handle_manual_payment_confirmed(

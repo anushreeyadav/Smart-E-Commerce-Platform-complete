@@ -32,7 +32,14 @@ class PaymentResponse(BaseModel):
     status: PaymentStatus
     transaction_id: Optional[str] = None
     paid_at: Optional[datetime] = None
+    stripe_refund_id: Optional[str] = None
+    refunded_at: Optional[datetime] = None
     timestamp: datetime
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class PaymentSyncResponse(BaseModel):
+    payment: PaymentResponse
+    verified_state: str

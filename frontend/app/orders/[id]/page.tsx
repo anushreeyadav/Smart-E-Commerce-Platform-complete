@@ -25,8 +25,30 @@ const STATUS_STYLES: Record<string, string> = {
   cancelled: "bg-rose-100 text-rose-700",
 };
 
-function StatusPill({ status }: { status: string }) {
-  const style = STATUS_STYLES[status] ?? "bg-slate-100 text-slate-600";
+const RETURN_STATUS_STYLES: Record<string, string> = {
+  pending: "bg-amber-100 text-amber-700",
+  approved: "bg-emerald-100 text-emerald-700",
+  rejected: "bg-rose-100 text-rose-700",
+  returned: "bg-sky-100 text-sky-700",
+  refunded: "bg-cyan-100 text-cyan-700",
+};
+
+const RETURN_STATUS_LABELS: Record<string, string> = {
+  pending: "Return Request Pending",
+  approved: "Return Request Approved",
+  rejected: "Return Request Rejected",
+  returned: "Item Returned",
+  refunded: "Refund Issued",
+};
+
+function StatusPill({
+  status,
+  styles = STATUS_STYLES,
+}: {
+  status: string;
+  styles?: Record<string, string>;
+}) {
+  const style = styles[status] ?? "bg-slate-100 text-slate-600";
 
   return (
     <span
@@ -35,6 +57,11 @@ function StatusPill({ status }: { status: string }) {
       {status.replace(/_/g, " ")}
     </span>
   );
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return "—";
+  return new Date(value).toLocaleString();
 }
 
 function StatusTracker({ status }: { status: string }) {
@@ -267,6 +294,83 @@ export default function OrderDetailPage() {
                 </div>
               </aside>
             </div>
+
+            {order.return_request && (
+              <div className="rounded-3xl border border-violet-200 bg-violet-50 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.06)]">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="text-lg font-bold text-slate-950">
+                    Return Request
+                  </h3>
+                  <StatusPill
+                    status={order.return_request.status}
+                    styles={RETURN_STATUS_STYLES}
+                  />
+                </div>
+
+                <p className="mt-2 text-sm font-semibold text-violet-800">
+                  {RETURN_STATUS_LABELS[order.return_request.status] ??
+                    `Return Request ${order.return_request.status}`}
+                </p>
+
+                <dl className="mt-4 space-y-3 text-sm text-slate-700">
+                  <div>
+                    <dt className="text-xs uppercase tracking-wide text-slate-500">
+                      Reason
+                    </dt>
+                    <dd className="mt-0.5">{order.return_request.reason}</dd>
+                  </div>
+
+                  {order.return_request.comments && (
+                    <div>
+                      <dt className="text-xs uppercase tracking-wide text-slate-500">
+                        Your comments
+                      </dt>
+                      <dd className="mt-0.5">{order.return_request.comments}</dd>
+                    </div>
+                  )}
+
+                  <div className="text-xs text-slate-500">
+                    Submitted {formatDateTime(order.return_request.created_at)}
+                  </div>
+
+                  {order.return_request.reviewed_at && (
+                    <div className="rounded-2xl bg-white/70 p-3 text-sm">
+                      <p className="font-semibold text-slate-900">
+                        {order.return_request.status === "rejected"
+                          ? "Rejected"
+                          : "Reviewed"}{" "}
+                        {order.return_request.reviewed_by_name
+                          ? `by ${order.return_request.reviewed_by_name} `
+                          : ""}
+                        on {formatDateTime(order.return_request.reviewed_at)}
+                      </p>
+                      {order.return_request.review_comment && (
+                        <p className="mt-1 text-slate-600">
+                          &ldquo;{order.return_request.review_comment}&rdquo;
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </dl>
+
+                {order.return_request.history &&
+                  order.return_request.history.length > 0 && (
+                    <ul className="mt-4 space-y-1 border-t border-violet-200 pt-3 text-xs text-slate-600">
+                      {order.return_request.history.map((entry) => (
+                        <li key={entry.id}>
+                          {entry.previous_status
+                            ? `${entry.previous_status} → ${entry.new_status}`
+                            : `submitted as ${entry.new_status}`}{" "}
+                          &middot; {formatDateTime(entry.created_at)}
+                          {entry.comment && (
+                            <> — &ldquo;{entry.comment}&rdquo;</>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+              </div>
+            )}
           </div>
         )}
       </section>

@@ -9,9 +9,11 @@ from app.db.database import Base
 
 
 class ReturnRequestStatus(str, enum.Enum):
-    PENDING = "pending"
+    PENDING = "pending"  # customer-facing label: "Requested"
     APPROVED = "approved"
     REJECTED = "rejected"
+    RETURNED = "returned"
+    REFUNDED = "refunded"
 
 
 class ReturnRequest(Base):

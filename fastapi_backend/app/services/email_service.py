@@ -9,6 +9,7 @@ from fastapi import BackgroundTasks
 
 from app.models.order import Order
 from app.models.payment import Payment
+from app.models.return_request import ReturnRequest
 from app.models.user import User
 
 
@@ -318,6 +319,81 @@ def send_order_delivered_email(
     return send_email(
         recipient=user.email,
         subject=f"Order delivered — {order.id}",
+        body=body,
+    )
+
+
+def send_return_approved_email(
+    user: User,
+    return_request: ReturnRequest,
+) -> bool:
+    fields = [
+        ("Order ID", return_request.order_id),
+        ("Return reason", return_request.reason),
+    ]
+
+    if return_request.review_comment:
+        fields.append(("Note from our team", return_request.review_comment))
+
+    body = render_email(
+        greeting_name=user.name,
+        headline=f"Your return request for order {return_request.order_id} has been approved.",
+        fields=fields,
+        closing="We'll notify you again once your refund has been processed.",
+    )
+
+    return send_email(
+        recipient=user.email,
+        subject=f"Return request approved — {return_request.order_id}",
+        body=body,
+    )
+
+
+def send_return_rejected_email(
+    user: User,
+    return_request: ReturnRequest,
+) -> bool:
+    fields = [
+        ("Order ID", return_request.order_id),
+        ("Return reason", return_request.reason),
+    ]
+
+    if return_request.review_comment:
+        fields.append(("Reason for rejection", return_request.review_comment))
+
+    body = render_email(
+        greeting_name=user.name,
+        headline=f"Your return request for order {return_request.order_id} was rejected.",
+        fields=fields,
+        closing="If you have questions about this decision, please contact support.",
+    )
+
+    return send_email(
+        recipient=user.email,
+        subject=f"Return request rejected — {return_request.order_id}",
+        body=body,
+    )
+
+
+def send_refund_processed_email(
+    user: User,
+    return_request: ReturnRequest,
+) -> bool:
+    body = render_email(
+        greeting_name=user.name,
+        headline=f"Your refund for order {return_request.order_id} has been processed.",
+        fields=[
+            ("Order ID", return_request.order_id),
+        ],
+        closing=(
+            "The refunded amount should appear back in your original "
+            "payment method within a few business days."
+        ),
+    )
+
+    return send_email(
+        recipient=user.email,
+        subject=f"Refund processed — {return_request.order_id}",
         body=body,
     )
 

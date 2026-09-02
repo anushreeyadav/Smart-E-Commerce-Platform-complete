@@ -7,7 +7,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
-from app.core.stripe_client import get_frontend_url, get_stripe_client
+from app.core.stripe_client import get_frontend_url, get_stripe_client, stripe_field
 from app.models.cart import Cart
 from app.models.order import Order, OrderItem, OrderStatus
 from app.models.order_status_history import OrderStatusHistory
@@ -566,3 +566,54 @@ def mark_stripe_payment_failed(
     db.refresh(order)
 
     return payment, True
+
+
+def verify_stripe_checkout_payment(
+    db: Session,
+    *,
+    order: Order,
+) -> tuple[str, str | None]:
+    """Ask Stripe directly what happened to this order's Checkout Session,
+    rather than trusting the client. This is the source-of-truth check used
+    as a synchronous fallback right after a customer returns from Stripe
+    Checkout, for cases where the async webhook hasn't (yet) arrived.
+
+    Returns (verified_state, payment_intent_id) where verified_state is one
+    of "paid", "failed", "pending", or "already_settled". This function only
+    reads from Stripe - callers apply the actual transition (reusing the
+    same mark_stripe_payment_paid/failed the webhook uses), so verifying
+    never risks double-applying a state change.
+    """
+
+    payment = get_payment_by_order_id(db, order.id)
+
+    if payment and payment.status in (PaymentStatus.PAID, PaymentStatus.REFUNDED):
+        return "already_settled", payment.transaction_id
+
+    if not order.stripe_checkout_session_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This order was not paid through Stripe Checkout.",
+        )
+
+    stripe = get_stripe_client()
+
+    try:
+        session = stripe.checkout.Session.retrieve(order.stripe_checkout_session_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Unable to verify payment status with Stripe",
+        ) from exc
+
+    payment_intent_id = stripe_field(session, "payment_intent") or order.stripe_payment_intent_id
+
+    if stripe_field(session, "payment_status") == "paid":
+        return "paid", payment_intent_id
+
+    if stripe_field(session, "status") == "expired":
+        return "failed", payment_intent_id
+
+    return "pending", payment_intent_id

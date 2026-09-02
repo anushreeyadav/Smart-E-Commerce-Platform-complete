@@ -466,6 +466,26 @@ export async function createCheckoutSession(
     }),
   });
 }
+
+export interface PaymentSyncResult {
+  payment: {
+    id: string;
+    order_id: string;
+    status: string;
+    transaction_id?: string | null;
+  };
+  verified_state: "paid" | "failed" | "pending" | "already_settled";
+}
+
+// Verifies this order's payment directly with Stripe and applies the result
+// if it has resolved. Called right after returning from Stripe Checkout, as
+// a reliable fallback for when the async webhook hasn't landed yet - it
+// never trusts anything the client claims, only what Stripe itself reports.
+export async function syncOrderPayment(orderId: string) {
+  return authedFetch<PaymentSyncResult>(`/payments/${orderId}/sync`, {
+    method: "POST",
+  });
+}
 export interface Notification {
   id: string;
   user_id: string;
@@ -663,6 +683,13 @@ export async function rejectReturnRequest(orderId: string, comment: string) {
   return authedFetch<ReturnRequest>(`/orders/${orderId}/return/reject`, {
     method: "POST",
     body: JSON.stringify({ comment }),
+  });
+}
+
+export async function initiateReturnRefund(returnRequestId: string, comment?: string) {
+  return authedFetch<ReturnRequest>(`/admin/returns/${returnRequestId}/refund`, {
+    method: "POST",
+    body: JSON.stringify({ comment: comment || undefined }),
   });
 }
 

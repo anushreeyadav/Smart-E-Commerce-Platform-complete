@@ -192,6 +192,16 @@ async def change_order_status(
             detail="Order not found",
         )
 
+    if request.status == OrderStatus.PAID:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "An order can only be marked paid by an actual Stripe payment. "
+                "Use 'Confirm Payment' to verify it with Stripe, instead of "
+                "setting this status manually."
+            ),
+        )
+
     updated_order, _changed = await handle_order_status_change(
         db,
         order=order,

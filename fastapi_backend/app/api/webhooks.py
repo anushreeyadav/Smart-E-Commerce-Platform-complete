@@ -1,7 +1,7 @@
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from app.core.stripe_client import get_stripe_client
+from app.core.stripe_client import get_stripe_client, stripe_field
 from app.db.database import SessionLocal
 from app.services.notification_events import (
     handle_stripe_payment_failed,
@@ -61,12 +61,12 @@ async def stripe_webhook(
 
     event_type = event["type"]
     data_object = event["data"]["object"]
-    metadata = data_object.get("metadata") or {}
+    metadata = stripe_field(data_object, "metadata") or {}
     payment_intent_id = (
-        data_object.get("payment_intent")
-        or data_object.get("id")
+        stripe_field(data_object, "payment_intent")
+        or stripe_field(data_object, "id")
     )
-    order_id = metadata.get("order_id")
+    order_id = stripe_field(metadata, "order_id")
 
     db: Session = SessionLocal()
 
@@ -109,6 +109,8 @@ async def stripe_webhook(
         if event_type in {
             "checkout.session.async_payment_failed",
             "payment_intent.payment_failed",
+            "checkout.session.expired",
+            "payment_intent.canceled",
         }:
             payment = await handle_stripe_payment_failed(
                 db,

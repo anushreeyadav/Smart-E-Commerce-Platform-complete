@@ -86,6 +86,37 @@ def test_shipped_to_delivered_direct_transition_still_allowed(
     assert response.json()["status"] == "delivered"
 
 
+def test_admin_cannot_manually_mark_an_order_paid(
+    db_session, client, customer, admin_headers, staff_headers
+):
+    """An order can only become 'paid' through a real, Stripe-verified
+    payment (webhook or the Confirm Payment sync) - never a manual status
+    click, which used to let an order (and its "Payment" column) show PAID
+    without any money ever actually changing hands."""
+
+    order = _order(db_session, customer.id, status=OrderStatus.CONFIRMED)
+
+    response = client.patch(
+        f"/orders/{order.id}/status",
+        json={"status": "paid"},
+        headers=admin_headers,
+    )
+    assert response.status_code == 400
+
+    db_session.refresh(order)
+    assert order.status == OrderStatus.CONFIRMED
+    assert order.payment_status == "pending"
+
+    # Also blocked for staff, and regardless of the order's current status.
+    other_order = _order(db_session, customer.id, status=OrderStatus.PENDING)
+    staff_response = client.patch(
+        f"/orders/{other_order.id}/status",
+        json={"status": "paid"},
+        headers=staff_headers,
+    )
+    assert staff_response.status_code == 400
+
+
 def test_order_detail_includes_shipping_address_and_history(
     db_session, client, customer, customer_headers
 ):

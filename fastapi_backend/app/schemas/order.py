@@ -106,6 +106,17 @@ class ReturnRejectRequest(BaseModel):
         return value
 
 
+class ReturnTransitionRequest(BaseModel):
+    comment: Optional[str] = Field(default=None, max_length=2000)
+
+
+class PaginatedReturnRequestsResponse(BaseModel):
+    items: List[ReturnRequestResponse]
+    total: int
+    page: int
+    page_size: int
+
+
 class OrderStatusHistoryEntry(BaseModel):
     id: str
     previous_status: Optional[str] = None

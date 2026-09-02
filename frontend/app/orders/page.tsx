@@ -12,11 +12,13 @@ import {
   fetchCurrentUser,
   fetchMyOrders,
   fetchOrder,
+  initiateReturnRefund,
   isAuthenticated,
   onOrderStatusChanged,
   Order,
   rejectReturnRequest,
   submitReturnRequest,
+  syncOrderPayment,
   updateOrderStatus,
 } from "@/lib/storefront";
 
@@ -35,6 +37,8 @@ const RETURN_STATUS_STYLES: Record<string, string> = {
   pending: "bg-amber-100 text-amber-700",
   approved: "bg-emerald-100 text-emerald-700",
   rejected: "bg-rose-100 text-rose-700",
+  returned: "bg-sky-100 text-sky-700",
+  refunded: "bg-cyan-100 text-cyan-700",
 };
 
 function StatusPill({
@@ -289,9 +293,20 @@ function CustomerOrdersView() {
 
                 <div className="mt-5">
                   {order.return_request ? (
-                    <span className="inline-flex rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-violet-700">
-                      Return Requested
-                    </span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Return request:
+                      </span>
+                      <StatusPill
+                        status={order.return_request.status}
+                        styles={RETURN_STATUS_STYLES}
+                      />
+                      {order.return_request.review_comment && (
+                        <span className="text-xs text-slate-500">
+                          &ldquo;{order.return_request.review_comment}&rdquo;
+                        </span>
+                      )}
+                    </div>
                   ) : order.return_eligible ? (
                     <button
                       type="button"
@@ -376,9 +391,12 @@ const ORDER_STATUS_FILTERS = [
 // Mirrors ALLOWED_STATUS_TRANSITIONS in fastapi_backend/app/services/order_service.py.
 // return_requested is intentionally excluded: that transition only happens
 // when a customer submits a return request, never via manual admin action.
+// "paid" is also excluded here on purpose: an order can only become paid
+// through an actual verified Stripe payment (webhook or "Confirm Payment"),
+// never a manual click - the backend rejects a manual attempt to set it too.
 const NEXT_STATUSES: Record<string, string[]> = {
   pending: ["confirmed", "cancelled"],
-  confirmed: ["paid", "cancelled"],
+  confirmed: ["cancelled"],
   paid: ["shipped", "cancelled"],
   shipped: ["out_for_delivery", "delivered"],
   out_for_delivery: ["delivered"],
@@ -418,10 +436,18 @@ function AdminOrdersView() {
 
   const [pendingStatus, setPendingStatus] = useState<string | null>(null);
   const [statusActionLoading, setStatusActionLoading] = useState(false);
+  const [statusDialogError, setStatusDialogError] = useState("");
 
-  const [returnDialog, setReturnDialog] = useState<"approve" | "reject" | null>(null);
+  const [returnDialog, setReturnDialog] = useState<"approve" | "reject" | "refund" | null>(null);
   const [returnComment, setReturnComment] = useState("");
   const [returnActionLoading, setReturnActionLoading] = useState(false);
+  const [returnDialogError, setReturnDialogError] = useState("");
+
+  const [confirmPaymentLoading, setConfirmPaymentLoading] = useState(false);
+  const [confirmPaymentResult, setConfirmPaymentResult] = useState<{
+    type: "success" | "info" | "error";
+    text: string;
+  } | null>(null);
 
   const loadOrders = async () => {
     setListLoading(true);
@@ -456,6 +482,7 @@ function AdminOrdersView() {
     setSelectedOrder(null);
     setDetailError("");
     setDetailLoading(true);
+    setConfirmPaymentResult(null);
     try {
       const order = await fetchOrder(orderId);
       setSelectedOrder(order);
@@ -470,8 +497,11 @@ function AdminOrdersView() {
     setSelectedOrderId(null);
     setSelectedOrder(null);
     setPendingStatus(null);
+    setStatusDialogError("");
     setReturnDialog(null);
     setReturnComment("");
+    setReturnDialogError("");
+    setConfirmPaymentResult(null);
   };
 
   const refreshAfterMutation = async (updatedOrder?: Order) => {
@@ -490,16 +520,19 @@ function AdminOrdersView() {
   const confirmStatusChange = async () => {
     if (!selectedOrderId || !pendingStatus) return;
     setStatusActionLoading(true);
+    setStatusDialogError("");
     try {
       const updated = await updateOrderStatus(selectedOrderId, pendingStatus);
       setBanner({ type: "success", text: `Order status updated to "${pendingStatus.replace(/_/g, " ")}".` });
       setPendingStatus(null);
       await refreshAfterMutation(updated);
     } catch (err) {
-      setBanner({
-        type: "error",
-        text: err instanceof Error ? err.message : "Unable to update order status.",
-      });
+      // Shown inline in the confirmation dialog itself - it sits above the
+      // order-detail modal, so a banner on the page underneath would be
+      // invisible until both modals are closed.
+      setStatusDialogError(
+        err instanceof Error ? err.message : "Unable to update order status."
+      );
     } finally {
       setStatusActionLoading(false);
     }
@@ -508,29 +541,72 @@ function AdminOrdersView() {
   const confirmReturnDecision = async () => {
     if (!selectedOrderId || !returnDialog) return;
     if (returnDialog === "reject" && !returnComment.trim()) {
-      setBanner({ type: "error", text: "A reason is required to reject a return request." });
+      setReturnDialogError("A reason is required to reject a return request.");
       return;
     }
+    if (returnDialog === "refund" && !selectedOrder?.return_request) return;
 
     setReturnActionLoading(true);
+    setReturnDialogError("");
     try {
       if (returnDialog === "approve") {
         await approveReturnRequest(selectedOrderId, returnComment.trim() || undefined);
         setBanner({ type: "success", text: "Return request approved." });
-      } else {
+      } else if (returnDialog === "reject") {
         await rejectReturnRequest(selectedOrderId, returnComment.trim());
         setBanner({ type: "success", text: "Return request rejected." });
+      } else {
+        await initiateReturnRefund(selectedOrder!.return_request!.id, returnComment.trim() || undefined);
+        setBanner({ type: "success", text: "Refund initiated — the customer's payment has been refunded." });
       }
       setReturnDialog(null);
       setReturnComment("");
       await refreshAfterMutation();
     } catch (err) {
-      setBanner({
-        type: "error",
-        text: err instanceof Error ? err.message : "Unable to process the return request.",
-      });
+      // Shown inline (see confirmStatusChange above) so a failed refund/
+      // approve/reject is actually visible instead of silently appearing to
+      // do nothing behind the still-open confirmation dialog.
+      setReturnDialogError(
+        err instanceof Error ? err.message : "Unable to process the return request."
+      );
     } finally {
       setReturnActionLoading(false);
+    }
+  };
+
+  const handleConfirmPayment = async () => {
+    if (!selectedOrderId) return;
+    setConfirmPaymentLoading(true);
+    setConfirmPaymentResult(null);
+    try {
+      const result = await syncOrderPayment(selectedOrderId);
+      if (result.verified_state === "paid") {
+        setConfirmPaymentResult({
+          type: "success",
+          text: "Stripe confirmed this payment — the order is now marked as Paid.",
+        });
+        setBanner({ type: "success", text: "Payment confirmed with Stripe." });
+      } else if (result.verified_state === "already_settled") {
+        setConfirmPaymentResult({ type: "info", text: "This payment was already confirmed." });
+      } else if (result.verified_state === "failed") {
+        setConfirmPaymentResult({
+          type: "error",
+          text: "Stripe reports this payment failed, was cancelled, or was never completed. It has not been marked as paid.",
+        });
+      } else {
+        setConfirmPaymentResult({
+          type: "info",
+          text: "Stripe has not confirmed this payment yet — the customer may not have finished checkout.",
+        });
+      }
+      await refreshAfterMutation();
+    } catch (err) {
+      setConfirmPaymentResult({
+        type: "error",
+        text: err instanceof Error ? err.message : "Unable to verify this payment with Stripe.",
+      });
+    } finally {
+      setConfirmPaymentLoading(false);
     }
   };
 
@@ -657,6 +733,8 @@ function AdminOrdersView() {
                 <option value="pending">Pending review</option>
                 <option value="approved">Approved</option>
                 <option value="rejected">Rejected</option>
+                <option value="returned">Returned</option>
+                <option value="refunded">Refunded</option>
               </select>
             </div>
           </div>
@@ -825,6 +903,34 @@ function AdminOrdersView() {
                     <p className="mt-2 text-sm font-semibold text-slate-900">
                       {selectedOrder.payment_status} &middot; {selectedOrder.payment_method}
                     </p>
+
+                    {selectedOrder.payment_method === "stripe" &&
+                      selectedOrder.payment_status !== "paid" &&
+                      selectedOrder.payment_status !== "refunded" && (
+                        <div className="mt-3">
+                          <button
+                            type="button"
+                            onClick={() => void handleConfirmPayment()}
+                            disabled={confirmPaymentLoading}
+                            className="rounded-full bg-slate-950 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-white transition hover:bg-slate-800 disabled:opacity-50"
+                          >
+                            {confirmPaymentLoading ? "Checking with Stripe..." : "Confirm Payment"}
+                          </button>
+                          {confirmPaymentResult && (
+                            <p
+                              className={`mt-2 text-xs ${
+                                confirmPaymentResult.type === "success"
+                                  ? "text-emerald-700"
+                                  : confirmPaymentResult.type === "error"
+                                    ? "text-rose-700"
+                                    : "text-slate-500"
+                              }`}
+                            >
+                              {confirmPaymentResult.text}
+                            </p>
+                          )}
+                        </div>
+                      )}
                   </div>
                   <div className="rounded-2xl bg-slate-50 p-4">
                     <p className="text-xs uppercase tracking-wide text-slate-400">Total</p>
@@ -876,7 +982,10 @@ function AdminOrdersView() {
                         <button
                           key={next}
                           type="button"
-                          onClick={() => setPendingStatus(next)}
+                          onClick={() => {
+                            setStatusDialogError("");
+                            setPendingStatus(next);
+                          }}
                           className="rounded-full bg-slate-950 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white transition hover:bg-slate-800"
                         >
                           Mark as {next.replace(/_/g, " ")}
@@ -972,19 +1081,52 @@ function AdminOrdersView() {
                       <div className="mt-4 flex gap-3">
                         <button
                           type="button"
-                          onClick={() => setReturnDialog("approve")}
+                          onClick={() => {
+                            setReturnDialogError("");
+                            setReturnDialog("approve");
+                          }}
                           className="rounded-full bg-emerald-600 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white transition hover:bg-emerald-500"
                         >
                           Accept return
                         </button>
                         <button
                           type="button"
-                          onClick={() => setReturnDialog("reject")}
+                          onClick={() => {
+                            setReturnDialogError("");
+                            setReturnDialog("reject");
+                          }}
                           className="rounded-full bg-rose-600 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white transition hover:bg-rose-500"
                         >
                           Reject return
                         </button>
                       </div>
+                    )}
+
+                    {(selectedOrder.return_request.status === "approved" ||
+                      selectedOrder.return_request.status === "returned") && (
+                      <div className="mt-4">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReturnDialogError("");
+                            setReturnDialog("refund");
+                          }}
+                          className="rounded-full bg-cyan-600 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white transition hover:bg-cyan-500"
+                        >
+                          Initiate refund
+                        </button>
+                        <p className="mt-2 text-xs text-slate-500">
+                          {selectedOrder.return_request.status === "approved"
+                            ? "This will mark the item as returned and refund the customer's payment."
+                            : "This will refund the customer's payment for this order."}
+                        </p>
+                      </div>
+                    )}
+
+                    {selectedOrder.return_request.status === "refunded" && (
+                      <p className="mt-4 text-sm font-medium text-cyan-700">
+                        Refund processed — the customer has been reimbursed.
+                      </p>
                     )}
                   </div>
                 )}
@@ -1003,11 +1145,19 @@ function AdminOrdersView() {
               from <strong>{selectedOrder.status.replace(/_/g, " ")}</strong> to{" "}
               <strong>{pendingStatus.replace(/_/g, " ")}</strong>?
             </p>
+            {statusDialogError && (
+              <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                {statusDialogError}
+              </p>
+            )}
             <div className="mt-6 flex justify-end gap-3">
               <button
                 type="button"
                 disabled={statusActionLoading}
-                onClick={() => setPendingStatus(null)}
+                onClick={() => {
+                  setStatusDialogError("");
+                  setPendingStatus(null);
+                }}
                 className="rounded-full px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
               >
                 Cancel
@@ -1029,21 +1179,32 @@ function AdminOrdersView() {
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/60 px-6">
           <div className="w-full max-w-md rounded-3xl bg-white p-7 shadow-2xl">
             <h3 className="text-lg font-bold text-slate-950">
-              {returnDialog === "approve" ? "Accept return request" : "Reject return request"}
+              {returnDialog === "approve"
+                ? "Accept return request"
+                : returnDialog === "reject"
+                  ? "Reject return request"
+                  : "Initiate refund"}
             </h3>
             <p className="mt-2 text-sm text-slate-600">
               {returnDialog === "approve"
                 ? "Optionally add a note for the record."
-                : "A reason is required so the customer understands the decision."}
+                : returnDialog === "reject"
+                  ? "A reason is required so the customer understands the decision."
+                  : "This will call Stripe to refund the customer's payment for this order. Optionally add a note for the record."}
             </p>
             <textarea
               value={returnComment}
               onChange={(e) => setReturnComment(e.target.value)}
               rows={3}
               maxLength={2000}
-              placeholder={returnDialog === "approve" ? "Optional comment" : "Reason for rejection"}
+              placeholder={returnDialog === "reject" ? "Reason for rejection" : "Optional comment"}
               className="mt-4 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-cyan-500"
             />
+            {returnDialogError && (
+              <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                {returnDialogError}
+              </p>
+            )}
             <div className="mt-6 flex justify-end gap-3">
               <button
                 type="button"
@@ -1051,6 +1212,7 @@ function AdminOrdersView() {
                 onClick={() => {
                   setReturnDialog(null);
                   setReturnComment("");
+                  setReturnDialogError("");
                 }}
                 className="rounded-full px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
               >
@@ -1063,14 +1225,20 @@ function AdminOrdersView() {
                 className={`rounded-full px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 ${
                   returnDialog === "approve"
                     ? "bg-emerald-600 hover:bg-emerald-500"
-                    : "bg-rose-600 hover:bg-rose-500"
+                    : returnDialog === "reject"
+                      ? "bg-rose-600 hover:bg-rose-500"
+                      : "bg-cyan-600 hover:bg-cyan-500"
                 }`}
               >
                 {returnActionLoading
-                  ? "Saving..."
+                  ? returnDialog === "refund"
+                    ? "Processing refund..."
+                    : "Saving..."
                   : returnDialog === "approve"
                     ? "Confirm accept"
-                    : "Confirm reject"}
+                    : returnDialog === "reject"
+                      ? "Confirm reject"
+                      : "Confirm refund"}
               </button>
             </div>
           </div>

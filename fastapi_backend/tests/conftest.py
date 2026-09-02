@@ -157,6 +157,36 @@ class FakePaymentIntent:
         self.client_secret = f"{id_}_secret"
 
 
+class FakeStripeObject:
+    """Mimics the real (non-dict) stripe-python StripeObject just enough to
+    catch code that calls .get() on a Stripe response instead of using
+    bracket access / stripe_field(). stripe-python 15.x's StripeObject
+    raises AttributeError on .get() ("is not a dict"), but a plain dict
+    stand-in would let that exact bug slip through every test - so this
+    fake deliberately doesn't implement .get() either."""
+
+    def __init__(self, data: dict):
+        self._data = {
+            key: FakeStripeObject(value) if isinstance(value, dict) else value
+            for key, value in data.items()
+        }
+
+    def __getitem__(self, key):
+        return self._data[key]
+
+    def __getattr__(self, key):
+        try:
+            return self._data[key]
+        except KeyError as exc:
+            raise AttributeError(key) from exc
+
+    def __contains__(self, key):
+        return key in self._data
+
+    def __repr__(self):
+        return f"FakeStripeObject({self._data!r})"
+
+
 class FakeCheckoutSession:
     def __init__(self, id_: str):
         self.id = id_
@@ -164,9 +194,35 @@ class FakeCheckoutSession:
 
 
 class FakeCheckoutSessionApi:
-    @staticmethod
-    def create(**kwargs):
-        return FakeCheckoutSession(f"cs_test_{uuid.uuid4().hex[:12]}")
+    # Keyed by session id, so tests can control what `retrieve` reports back
+    # (simulating what a real Stripe Checkout Session would look like after
+    # the customer pays, abandons, or the session expires).
+    sessions: dict = {}
+
+    @classmethod
+    def create(cls, **kwargs):
+        session = FakeCheckoutSession(f"cs_test_{uuid.uuid4().hex[:12]}")
+        cls.sessions[session.id] = {
+            "id": session.id,
+            "status": "open",
+            "payment_status": "unpaid",
+            "payment_intent": None,
+        }
+        return session
+
+    @classmethod
+    def retrieve(cls, session_id, **kwargs):
+        return FakeStripeObject(
+            cls.sessions.get(
+                session_id,
+                {
+                    "id": session_id,
+                    "status": "open",
+                    "payment_status": "unpaid",
+                    "payment_intent": None,
+                },
+            )
+        )
 
 
 class FakePaymentIntentApi:
@@ -184,26 +240,50 @@ class FakeWebhookApi:
     def construct_event(*, payload, sig_header, secret):
         import json
 
-        return json.loads(payload)
+        return FakeStripeObject(json.loads(payload))
 
 
 class FakeStripeError:
     SignatureVerificationError = FakeSignatureVerificationError
 
 
+class FakeRefund:
+    def __init__(self, id_: str, payment_intent: str):
+        self.id = id_
+        self.payment_intent = payment_intent
+        self.status = "succeeded"
+
+
+class FakeRefundApi:
+    calls = []
+    created = []
+
+    @classmethod
+    def create(cls, **kwargs):
+        cls.calls.append(kwargs)
+        refund = FakeRefund(f"re_test_{uuid.uuid4().hex[:12]}", kwargs.get("payment_intent"))
+        cls.created.append(refund)
+        return refund
+
+
 class FakeStripe:
     PaymentIntent = FakePaymentIntentApi
     checkout = type("checkout", (), {"Session": FakeCheckoutSessionApi})
     Webhook = FakeWebhookApi
+    Refund = FakeRefundApi
     error = FakeStripeError
 
 
 @pytest.fixture(autouse=True)
 def _fake_stripe(monkeypatch):
+    FakeRefundApi.calls = []
+    FakeRefundApi.created = []
+    FakeCheckoutSessionApi.sessions = {}
     fake = FakeStripe()
     monkeypatch.setattr(
         "app.services.order_service.get_stripe_client", lambda: fake
     )
+    monkeypatch.setattr("app.services.return_service.get_stripe_client", lambda: fake)
     monkeypatch.setattr("app.api.webhooks.get_stripe_client", lambda: fake)
     return fake
 

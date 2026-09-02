@@ -13,6 +13,7 @@ import {
   fetchCart,
   isAuthenticated,
   removeFromCart,
+  syncOrderPayment,
   updateCartItem,
 } from "@/lib/storefront";
 
@@ -69,16 +70,66 @@ function CartPageContent() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadCart();
   }, []);
 
   useEffect(() => {
     const checkoutState = searchParams.get("checkout");
+    const orderId = searchParams.get("order_id");
 
     if (checkoutState === "success") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setMessage(
-        "Payment completed successfully. Your order is now being processed."
+        "Payment completed successfully. Confirming with Stripe..."
       );
+
+      if (!orderId) {
+        return;
+      }
+
+      // The order/payment status only updates via Stripe's own confirmation
+      // (webhook or this verified sync) - never from this redirect alone.
+      // This is a synchronous fallback for when the async webhook hasn't
+      // landed yet, so the customer isn't stuck seeing "Pending" for
+      // something Stripe has already settled.
+      let cancelled = false;
+
+      const confirmPayment = async (attempt: number) => {
+        try {
+          const result = await syncOrderPayment(orderId);
+          if (cancelled) return;
+
+          if (
+            result.verified_state === "paid" ||
+            result.verified_state === "already_settled"
+          ) {
+            setMessage("Payment confirmed - your order is now marked as Paid.");
+          } else if (result.verified_state === "failed") {
+            setMessage(
+              "We couldn't confirm this payment with Stripe. If you were charged, please contact support."
+            );
+          } else if (attempt < 3) {
+            setTimeout(() => void confirmPayment(attempt + 1), 2000);
+          } else {
+            setMessage(
+              "Payment completed successfully. Your order is now being processed."
+            );
+          }
+        } catch {
+          if (!cancelled) {
+            setMessage(
+              "Payment completed successfully. Your order is now being processed."
+            );
+          }
+        }
+      };
+
+      void confirmPayment(1);
+
+      return () => {
+        cancelled = true;
+      };
     } else if (checkoutState === "cancelled") {
       setMessage(
         "Checkout was cancelled. Your cart is still saved and ready when you are."

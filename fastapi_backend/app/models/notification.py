@@ -16,6 +16,7 @@ class NotificationType(str, enum.Enum):
     ORDER_DELIVERED = "order_delivered"
     RETURN_APPROVED = "return_approved"
     RETURN_REJECTED = "return_rejected"
+    REFUND_PROCESSED = "refund_processed"
 
 
 class Notification(Base):

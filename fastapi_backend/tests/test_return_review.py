@@ -95,7 +95,7 @@ def test_finalized_return_request_cannot_be_processed_again(
         json={"comment": "changed my mind"},
         headers=staff_headers,
     )
-    assert second.status_code == 409
+    assert second.status_code == 400
 
 
 def test_customer_cannot_approve_or_reject_return_requests(

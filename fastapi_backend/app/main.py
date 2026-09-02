@@ -16,6 +16,7 @@ from app.api.products import router as products_router
 from app.api.cart import router as cart_router
 from app.api.checkout import router as checkout_router
 from app.api.orders import router as orders_router
+from app.api.admin_returns import router as admin_returns_router
 from app.api.payments import router as payments_router
 from app.api.webhooks import router as webhooks_router
 from app.api.websocket import router as websocket_router
@@ -104,6 +105,11 @@ app.include_router(
 app.include_router(
     orders_router,
     tags=["Orders"],
+)
+
+app.include_router(
+    admin_returns_router,
+    tags=["Admin - Returns"],
 )
 
 app.include_router(

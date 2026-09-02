@@ -6,8 +6,11 @@ from app.db.database import get_db
 from app.models.order import Order
 from app.models.payment import Payment
 from app.models.user import User, UserRole
-from app.schemas.payment import PaymentConfirmRequest, PaymentResponse
-from app.services.notification_events import handle_manual_payment_confirmed
+from app.schemas.payment import PaymentConfirmRequest, PaymentResponse, PaymentSyncResponse
+from app.services.notification_events import (
+    handle_manual_payment_confirmed,
+    handle_stripe_payment_sync,
+)
 from app.services.order_service import (
     get_order_by_id,
     get_payment_by_order_id,
@@ -77,6 +80,43 @@ def get_payment(
         )
 
     return payment
+
+
+@router.post("/{order_id}/sync", response_model=PaymentSyncResponse)
+async def sync_order_payment(
+    order_id: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Verify this order's payment status directly with Stripe and apply the
+    resulting transition if it has resolved. Meant to be called right after
+    the customer returns from Stripe Checkout, as a reliable fallback for
+    when the async webhook hasn't (yet) landed - it never trusts anything
+    the client claims, only what Stripe itself reports for this order's
+    Checkout Session."""
+
+    order = get_order_by_id(db, order_id)
+
+    if not order:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found",
+        )
+
+    if current_user.role == UserRole.CUSTOMER and order.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only sync your own payment",
+        )
+
+    payment, verified_state = await handle_stripe_payment_sync(
+        db,
+        order=order,
+        background_tasks=background_tasks,
+    )
+
+    return {"payment": payment, "verified_state": verified_state}
 
 
 @router.post("/{order_id}/confirm", response_model=PaymentResponse)
